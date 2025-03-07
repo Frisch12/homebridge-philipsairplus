@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.24] - 2025-03-07
+- Updated dependencies
+- Ability to set heating threshold temperature, or target temperature
+
+
 ## [1.0.23] - 2025-02-17
 - Updated dependencies
 - Fixed poll mechanism

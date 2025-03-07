@@ -182,6 +182,29 @@ export class HeaterCoolerAccessory extends AirControlHandler {
     }
   }
 
+
+  /**
+   * Handle "SET" requests from HomeKit
+   * These are sent when the user changes the state of an accessory, for example, turning on a Light bulb.
+   */
+  async setTargetTemperature(value: CharacteristicValue) {    
+    if (this.heaterCoolerService && this.obj) {
+      this.platform.log.debug(`setTargetTemperature(${value})`, this.accessory.displayName);
+    
+      try {
+        const args = [...this.args];
+        args.push('set', `D0310E=${value}`,'-I');
+        this.obj.setActive(value as number);
+        this.heaterCoolerService.updateCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature, value);        
+        await this.sendCommand(args, 60);
+      } catch (error) {
+        this.handleError(error, `setTargetTemperature(${value}):`);
+      }
+    } else {
+      this.platform.log.error(`setTargetTemperature(${value}): No service or object`, this.accessory.displayName);
+    }
+  }
+
   async onCmdData(data: string, startPoll: boolean) {
     data = data.toString().replace(/\n$/, '');
     this.platform.log.debug('onCmdData:', data, this.accessory.displayName);
@@ -226,6 +249,8 @@ export class HeaterCoolerAccessory extends AirControlHandler {
         this.heaterCoolerService.setCharacteristic(this.platform.Characteristic.TargetHeaterCoolerState, 
           this.platform.Characteristic.TargetHeaterCoolerState.AUTO);
         this.heaterCoolerService.setCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature, this.obj.getTargetTemperature());
+        this.heaterCoolerService.getCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature)
+          .onSet(this.setTargetTemperature.bind(this));
         break;
       case Mode.ventilation:
         this.heaterCoolerService.setCharacteristic(this.platform.Characteristic.CurrentHeaterCoolerState,
@@ -359,6 +384,8 @@ export class HeaterCoolerAccessory extends AirControlHandler {
           this.heaterCoolerService.updateCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature, this.obj.getTargetTemperature());
         } else {
           this.heaterCoolerService.setCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature, this.obj.getTargetTemperature());
+          this.heaterCoolerService.getCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature)
+            .onSet(this.setTargetTemperature.bind(this));
         }      
         break;
       case Mode.ventilation:
