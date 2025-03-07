@@ -39,7 +39,8 @@
               "condition": {
                 "functionBody": "try { return model.devices[arrayIndices[0]].active } catch(e){ return false }"
               }
-            },"deviceId": {
+            },
+            "deviceId": {
               "title": "Device Id",
               "type": "string",
               "required": true,
@@ -53,7 +54,8 @@
               "type": "string",
               "required": true,
               "enum": [
-                "heater"
+                "heater",
+                "thermostat"
               ],
               "default": "heater",
               "description": "Set the type of device.",

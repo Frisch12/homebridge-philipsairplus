@@ -9,8 +9,9 @@ import { Mode, SmartFanHeater, Swing } from './types/SmartFanHeater.js';
  * An instance of this class is created for each accessory your platform registers
  * Each accessory may expose multiple services of different service types.
  */
-export class HeaterCoolerAccessory extends AirControlHandler {
-  private heaterCoolerService: Service | undefined;
+export class ThermostatAccessory extends AirControlHandler {
+  private thermostatService: Service | undefined; 
+  private swingService: Service | undefined;
   private lightService: Service | undefined;
   private beepService: Service | undefined;
   private autoPlusAIService: Service | undefined;
@@ -51,14 +52,14 @@ export class HeaterCoolerAccessory extends AirControlHandler {
    * These are sent when the user changes the state of an accessory, for example, turning on a Light bulb.
    */
   async setActive(value: CharacteristicValue) {    
-    if (this.heaterCoolerService && this.obj) {
+    if (this.thermostatService && this.obj) {
       this.platform.log.debug(`setActive(${value})`, this.accessory.displayName);
     
       try {
         const args = [...this.args];
         args.push('set', `D03102=${value}`,'-I');
         this.obj.setActive(value as number);
-        this.heaterCoolerService.updateCharacteristic(this.platform.Characteristic.Active, value);        
+        this.thermostatService.updateCharacteristic(this.platform.Characteristic.Active, value);        
         await this.sendCommand(args, 60);
       } catch (error) {
         this.handleError(error, `setActive(${value}):`);
@@ -73,14 +74,14 @@ export class HeaterCoolerAccessory extends AirControlHandler {
    * These are sent when the user changes the state of an accessory, for example, turning on a Light bulb.
    */
   async setSwingMode(value: CharacteristicValue) {    
-    if (this.heaterCoolerService && this.obj) {
+    if (this.thermostatService && this.obj) {
       this.platform.log.debug(`setSwingMode(${value})`, this.accessory.displayName);
     
       try {
         const args = [...this.args];
         args.push('set', `D0320F=${(value as number * this.obj.SwingModeSetValue)}`,'-I');
         this.obj.setSwingMode(value as number);
-        this.heaterCoolerService.updateCharacteristic(this.platform.Characteristic.SwingMode, value);        
+        this.thermostatService.updateCharacteristic(this.platform.Characteristic.SwingMode, value);        
         await this.sendCommand(args, 60);
       } catch (error) {
         this.handleError(error, `setSwingMode(${value}):`);
@@ -162,16 +163,16 @@ export class HeaterCoolerAccessory extends AirControlHandler {
    * These are sent when the user changes the state of an accessory, for example, turning on a Light bulb.
    */
   async setTemperatureUnits(value: CharacteristicValue) {
-    if (this.heaterCoolerService && this.obj) {
+    if (this.thermostatService && this.obj) {
       this.platform.log.debug(`setTemperatureUnits(${value})`, this.accessory.displayName);
     
       try {
         this.obj.setTemperatureUnit(value as number);
-        this.heaterCoolerService.updateCharacteristic(this.platform.Characteristic.TemperatureDisplayUnits, value);
-        this.heaterCoolerService.updateCharacteristic(this.platform.Characteristic.CurrentTemperature, this.obj.getCurrentTemp());
-        const c = this.heaterCoolerService.getCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature);
+        this.thermostatService.updateCharacteristic(this.platform.Characteristic.TemperatureDisplayUnits, value);
+        this.thermostatService.updateCharacteristic(this.platform.Characteristic.CurrentTemperature, this.obj.getCurrentTemp());
+        const c = this.thermostatService.getCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature);
         if (c) {
-          this.heaterCoolerService.updateCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature, 
+          this.thermostatService.updateCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature, 
             this.obj.getTargetTemperature());
         }
       } catch (error) {
@@ -179,6 +180,98 @@ export class HeaterCoolerAccessory extends AirControlHandler {
       }
     } else {
       this.platform.log.error(`setTemperatureUnits(${value}): No service or object`, this.accessory.displayName);
+    }
+  }
+
+
+  /**
+   * Handle "SET" requests from HomeKit
+   * These are sent when the user changes the state of an accessory, for example, turning on a Light bulb.
+   */
+  async setTargetTemperature(value: CharacteristicValue) {    
+    if (this.thermostatService && this.obj) {
+      this.platform.log.debug(`setTargetTemperature(${value})`, this.accessory.displayName);
+    
+      try {
+        const args = [...this.args];
+        args.push('set', `D0310E=${value}`,'-I');
+        this.obj.setTargetTemperature(value as number);
+        await this.sendCommand(args, 60);
+      } catch (error) {
+        this.handleError(error, `setTargetTemperature(${value}):`);
+      }
+    } else {
+      this.platform.log.error(`setTargetTemperature(${value}): No service or object`, this.accessory.displayName);
+    }
+  }
+
+  
+  /**
+   * Handle "SET" requests from HomeKit
+   * These are sent when the user changes the state of an accessory, for example, turning on a Light bulb.
+   */
+  async setMode(value: Mode) {    
+    if (this.thermostatService && this.obj) {
+      this.platform.log.debug(`setMode(${value})`, this.accessory.displayName);
+      
+      try {
+        const args = [...this.args];
+        args.push('set', `D0310C=${value}`,'-I');
+        this.obj.setMode(value);
+        await this.sendCommand(args, 60);
+      } catch (error) {
+        this.handleError(error, `setMode(${value}):`);
+      }
+    } else {
+      this.platform.log.error(`setMode(${value}): No service or object`, this.accessory.displayName);
+    }
+  }
+  
+  async setCurrentHeatingCoolingState(value: CharacteristicValue) {
+    if (this.thermostatService && this.obj) {
+      this.platform.log.debug(`setCurrentHeatingCoolingState(${value})`, this.accessory.displayName);
+      switch(value){
+      case this.platform.Characteristic.CurrentHeatingCoolingState.OFF:
+        await this.setActive(this.platform.Characteristic.Active.INACTIVE);
+        break;
+      case this.platform.Characteristic.CurrentHeatingCoolingState.COOL:
+        await this.setActive(this.platform.Characteristic.Active.ACTIVE);
+        await this.setMode(Mode.ventilation);
+        break;
+      case this.platform.Characteristic.CurrentHeatingCoolingState.HEAT:
+        await this.setActive(this.platform.Characteristic.Active.ACTIVE);
+        await this.setMode(Mode.high);
+        break;
+      }
+    } else {
+      this.platform.log.error(`setCurrentHeatingCoolingState(${value}): No service or object`, this.accessory.displayName);
+    }
+  }
+
+  async setTargetHeatingCoolingState(value: CharacteristicValue) {
+    if (this.thermostatService && this.obj) {
+      this.platform.log.debug(`setTargetHeatingCoolingState(${value})`, this.accessory.displayName);
+
+      switch(value){
+      case this.platform.Characteristic.TargetHeatingCoolingState.OFF:
+        await this.setActive(this.platform.Characteristic.Active.INACTIVE);
+        break;
+      case this.platform.Characteristic.TargetHeatingCoolingState.COOL:
+        await this.setActive(this.platform.Characteristic.Active.ACTIVE);
+        await this.setMode(Mode.ventilation);
+        break;
+      case this.platform.Characteristic.TargetHeatingCoolingState.HEAT:
+        await this.setActive(this.platform.Characteristic.Active.ACTIVE);
+        await this.setMode(Mode.high);
+        break;
+      case this.platform.Characteristic.TargetHeatingCoolingState.AUTO:
+        await this.setActive(this.platform.Characteristic.Active.ACTIVE);
+        await this.setMode(Mode.auto);
+        break;
+      }
+
+    } else {
+      this.platform.log.error(`setTargetHeatingCoolingState(${value}): No service or object`, this.accessory.displayName);
     }
   }
 
@@ -196,12 +289,11 @@ export class HeaterCoolerAccessory extends AirControlHandler {
         .setCharacteristic(this.platform.Characteristic.FirmwareRevision, this.obj.getFirmware());
       
       // get the HeaterCooler service if it exists, otherwise create a new HeaterCooler service
-      this.heaterCoolerService = this.accessory.getService(this.platform.Service.HeaterCooler) || 
-      this.accessory.addService(this.platform.Service.HeaterCooler, this.obj.getName());
+      this.thermostatService = this.accessory.getService(this.platform.Service.Thermostat) || 
+      this.accessory.addService(this.platform.Service.Thermostat, this.obj.getName());
 
-      const mode = this.obj.getMode();
-      const tempCharacteristic = this.heaterCoolerService.getCharacteristic(this.platform.Characteristic.TemperatureDisplayUnits) ||
-        this.heaterCoolerService.setCharacteristic(this.platform.Characteristic.TemperatureDisplayUnits, 
+      const tempCharacteristic = this.thermostatService.getCharacteristic(this.platform.Characteristic.TemperatureDisplayUnits) ||
+        this.thermostatService.setCharacteristic(this.platform.Characteristic.TemperatureDisplayUnits, 
           this.platform.Characteristic.TemperatureDisplayUnits.CELSIUS);
 
       this.obj.setTemperatureUnit(tempCharacteristic.value || this.platform.Characteristic.TemperatureDisplayUnits.CELSIUS);
@@ -210,56 +302,72 @@ export class HeaterCoolerAccessory extends AirControlHandler {
 
       // Required Characteristics
       // each service must implement at-minimum the "required characteristics" for the given service type
-      // see https://developers.homebridge.io/#/service/HeaterCooler
+      // see https://developers.homebridge.io/#/service/Thermostat
 
-      this.heaterCoolerService.setCharacteristic(this.platform.Characteristic.Active, 
-        this.obj.getActive() ? this.platform.Characteristic.Active.ACTIVE : this.platform.Characteristic.Active.INACTIVE);
-
-      // register handlers for the Active/Inactive Characteristic
-      this.heaterCoolerService.getCharacteristic(this.platform.Characteristic.Active)
-        .onSet(this.setActive.bind(this));
-
-      switch(mode) {
-      case Mode.auto:
-        this.heaterCoolerService.setCharacteristic(this.platform.Characteristic.CurrentHeaterCoolerState,
-          this.platform.Characteristic.CurrentHeaterCoolerState.HEATING);
-        this.heaterCoolerService.setCharacteristic(this.platform.Characteristic.TargetHeaterCoolerState, 
-          this.platform.Characteristic.TargetHeaterCoolerState.AUTO);
-        this.heaterCoolerService.setCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature, this.obj.getTargetTemperature());        
-        break;
-      case Mode.ventilation:
-        this.heaterCoolerService.setCharacteristic(this.platform.Characteristic.CurrentHeaterCoolerState,
-          this.platform.Characteristic.CurrentHeaterCoolerState.IDLE);
-        this.heaterCoolerService.setCharacteristic(this.platform.Characteristic.TargetHeaterCoolerState, 
-          this.platform.Characteristic.TargetHeaterCoolerState.COOL);
-        break;
-      default:
-        this.heaterCoolerService.setCharacteristic(this.platform.Characteristic.CurrentHeaterCoolerState,
-          this.platform.Characteristic.CurrentHeaterCoolerState.HEATING);
-        this.heaterCoolerService.setCharacteristic(this.platform.Characteristic.TargetHeaterCoolerState, 
-          this.platform.Characteristic.TargetHeaterCoolerState.HEAT);
-        break;
+      if (!this.obj.getActive()) {
+        this.thermostatService.updateCharacteristic(this.platform.Characteristic.CurrentHeatingCoolingState,
+          this.platform.Characteristic.CurrentHeatingCoolingState.OFF);
+        this.thermostatService.updateCharacteristic(this.platform.Characteristic.TargetHeatingCoolingState, 
+          this.platform.Characteristic.TargetHeatingCoolingState.OFF);
+      } else {
+        switch(this.obj.getMode()) {
+        case Mode.auto:
+          this.thermostatService.updateCharacteristic(this.platform.Characteristic.CurrentHeatingCoolingState,
+            this.platform.Characteristic.CurrentHeatingCoolingState.HEAT);
+          this.thermostatService.updateCharacteristic(this.platform.Characteristic.TargetHeatingCoolingState, 
+            this.platform.Characteristic.TargetHeatingCoolingState.AUTO);
+          break;
+        case Mode.ventilation:
+          this.thermostatService.updateCharacteristic(this.platform.Characteristic.CurrentHeatingCoolingState,
+            this.platform.Characteristic.CurrentHeatingCoolingState.COOL);
+          this.thermostatService.updateCharacteristic(this.platform.Characteristic.TargetHeatingCoolingState, 
+            this.platform.Characteristic.TargetHeatingCoolingState.COOL);
+          break;
+        default:
+          this.thermostatService.updateCharacteristic(this.platform.Characteristic.CurrentHeatingCoolingState,
+            this.platform.Characteristic.CurrentHeatingCoolingState.HEAT);
+          this.thermostatService.updateCharacteristic(this.platform.Characteristic.TargetHeatingCoolingState, 
+            this.platform.Characteristic.TargetHeatingCoolingState.HEAT);
+          break;
+        }
       }
-      
-      this.heaterCoolerService.setCharacteristic(this.platform.Characteristic.CurrentTemperature, this.obj.getCurrentTemp());
+
+      this.thermostatService.getCharacteristic(this.platform.Characteristic.CurrentHeatingCoolingState)
+        .onSet(this.setCurrentHeatingCoolingState.bind(this));
+
+      this.thermostatService.getCharacteristic(this.platform.Characteristic.TargetHeatingCoolingState)
+        .onSet(this.setTargetHeatingCoolingState.bind(this));
+
+      this.thermostatService.setCharacteristic(this.platform.Characteristic.CurrentTemperature, this.obj.getCurrentTemp());
+
+      this.thermostatService.setCharacteristic(this.platform.Characteristic.TargetTemperature, this.obj.getTargetTemperature());
+      this.thermostatService.getCharacteristic(this.platform.Characteristic.TargetTemperature)
+        .onSet(this.setTargetTemperature.bind(this));
 
       // Optional Characteristics
 
-      this.heaterCoolerService.setCharacteristic(this.platform.Characteristic.Name, this.obj.getName());
+      this.thermostatService.setCharacteristic(this.platform.Characteristic.Name, this.obj.getName());
       
-      this.heaterCoolerService.setCharacteristic(this.platform.Characteristic.SwingMode, 
-        this.obj.getSwingMode() === Swing.on ? this.platform.Characteristic.SwingMode.SWING_ENABLED : 
-          this.platform.Characteristic.SwingMode.SWING_DISABLED);
+      // Map the beep function to a Switch
+      // get the Beep Switch service if it exists, otherwise create a new Switch service    
+      this.swingService = this.accessory.getService('Swing') ||
+        this.accessory.addService(this.platform.Service.Switch, 'Swing', 'SWING');
 
-      // register handlers for the SwingMode Characteristic
-      this.heaterCoolerService.getCharacteristic(this.platform.Characteristic.SwingMode)
+      // Required Characteristics
+      // each service must implement at-minimum the "required characteristics" for the given service type
+      // see https://developers.homebridge.io/#/service/Switch
+      this.swingService.setCharacteristic(this.platform.Characteristic.On, this.obj.getSwingMode() === Swing.on);
+
+      this.swingService.getCharacteristic(this.platform.Characteristic.On)
         .onSet(this.setSwingMode.bind(this));
 
+      // Optional Characteristics
+      this.swingService.setCharacteristic(this.platform.Characteristic.Name, 'Swing');
 
       // Map backligh to a Lightbulb
       // get the Lightbulb service if it exists, otherwise create a new Lightbulb service    
-      this.lightService = this.accessory.getService(this.platform.Service.Lightbulb) ||
-        this.accessory.addService(this.platform.Service.Lightbulb, 'Backlight');
+      this.lightService = this.accessory.getService('Backlight') ||
+        this.accessory.addService(this.platform.Service.Lightbulb, 'Backlight', 'BACKLIGHT');
 
       // Required Characteristics
       // each service must implement at-minimum the "required characteristics" for the given service type
@@ -321,16 +429,16 @@ export class HeaterCoolerAccessory extends AirControlHandler {
 
       // get the HeaterCooler service if it exists, otherwise create a new HeaterCooler service
       // you can create multiple services for each accessory
-      this.heaterCoolerService = this.accessory.getService(this.platform.Service.HeaterCooler) || 
-        this.accessory.addService(this.platform.Service.HeaterCooler);
+      this.thermostatService = this.accessory.getService(this.platform.Service.Thermostat) || 
+        this.accessory.addService(this.platform.Service.Thermostat);
 
       // Update object
       if (this.obj) {
         this.obj.updateObj(data);
       } else {
         this.obj = new SmartFanHeater(this.platform, data);
-        const tempCharacteristic = this.heaterCoolerService.getCharacteristic(this.platform.Characteristic.TemperatureDisplayUnits) ||
-        this.heaterCoolerService.setCharacteristic(this.platform.Characteristic.TemperatureDisplayUnits, 
+        const tempCharacteristic = this.thermostatService.getCharacteristic(this.platform.Characteristic.TemperatureDisplayUnits) ||
+        this.thermostatService.setCharacteristic(this.platform.Characteristic.TemperatureDisplayUnits, 
           this.platform.Characteristic.TemperatureDisplayUnits.CELSIUS);
         this.obj.setTemperatureUnit(tempCharacteristic.value || this.platform.Characteristic.TemperatureDisplayUnits.CELSIUS);
       }
@@ -338,61 +446,49 @@ export class HeaterCoolerAccessory extends AirControlHandler {
       // set accessory information
       this.accessory.getService(this.platform.Service.AccessoryInformation)!
         .updateCharacteristic(this.platform.Characteristic.FirmwareRevision, this.obj.getFirmware());
-
-
-    
-      const mode = this.obj.getMode();
-      const c = this.heaterCoolerService.getCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature);
             
       // Required Characteristics
-      this.heaterCoolerService.updateCharacteristic(this.platform.Characteristic.Active, 
-        this.obj.getActive() ? this.platform.Characteristic.Active.ACTIVE : this.platform.Characteristic.Active.INACTIVE );
-
-      switch(mode) {
-      case Mode.auto:
-        this.heaterCoolerService.updateCharacteristic(this.platform.Characteristic.CurrentHeaterCoolerState,
-          this.platform.Characteristic.CurrentHeaterCoolerState.HEATING);
-        this.heaterCoolerService.updateCharacteristic(this.platform.Characteristic.TargetHeaterCoolerState, 
-          this.platform.Characteristic.TargetHeaterCoolerState.AUTO);
-        // Threshold is optional and only set if Mode is Auto
-        if (c) {
-          this.heaterCoolerService.updateCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature, this.obj.getTargetTemperature());
-        } else {
-          this.heaterCoolerService.setCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature, this.obj.getTargetTemperature());          
-        }      
-        break;
-      case Mode.ventilation:
-        this.heaterCoolerService.updateCharacteristic(this.platform.Characteristic.CurrentHeaterCoolerState,
-          this.platform.Characteristic.CurrentHeaterCoolerState.IDLE);
-        this.heaterCoolerService.updateCharacteristic(this.platform.Characteristic.TargetHeaterCoolerState, 
-          this.platform.Characteristic.TargetHeaterCoolerState.COOL);
-        if (c) {
-          this.heaterCoolerService.removeCharacteristic(c);
+      if (!this.obj.getActive()) {
+        this.thermostatService.updateCharacteristic(this.platform.Characteristic.CurrentHeatingCoolingState,
+          this.platform.Characteristic.CurrentHeatingCoolingState.OFF);
+        this.thermostatService.updateCharacteristic(this.platform.Characteristic.TargetHeatingCoolingState, 
+          this.platform.Characteristic.TargetHeatingCoolingState.OFF);
+      } else {
+        switch(this.obj.getMode()) {
+        case Mode.auto:
+          this.thermostatService.updateCharacteristic(this.platform.Characteristic.CurrentHeatingCoolingState,
+            this.platform.Characteristic.CurrentHeatingCoolingState.HEAT);
+          this.thermostatService.updateCharacteristic(this.platform.Characteristic.TargetHeatingCoolingState, 
+            this.platform.Characteristic.TargetHeatingCoolingState.AUTO);
+          break;
+        case Mode.ventilation:
+          this.thermostatService.updateCharacteristic(this.platform.Characteristic.CurrentHeatingCoolingState,
+            this.platform.Characteristic.CurrentHeatingCoolingState.COOL);
+          this.thermostatService.updateCharacteristic(this.platform.Characteristic.TargetHeatingCoolingState, 
+            this.platform.Characteristic.TargetHeatingCoolingState.COOL);
+          break;
+        default:
+          this.thermostatService.updateCharacteristic(this.platform.Characteristic.CurrentHeatingCoolingState,
+            this.platform.Characteristic.CurrentHeatingCoolingState.HEAT);
+          this.thermostatService.updateCharacteristic(this.platform.Characteristic.TargetHeatingCoolingState, 
+            this.platform.Characteristic.TargetHeatingCoolingState.HEAT);
+          break;
         }
-        break;
-      default:
-        this.heaterCoolerService.updateCharacteristic(this.platform.Characteristic.CurrentHeaterCoolerState,
-          this.platform.Characteristic.CurrentHeaterCoolerState.HEATING);
-        this.heaterCoolerService.updateCharacteristic(this.platform.Characteristic.TargetHeaterCoolerState, 
-          this.platform.Characteristic.TargetHeaterCoolerState.HEAT);
-        if (c) {
-          this.heaterCoolerService.removeCharacteristic(c);
-        }
-        break;
       }
-
-      this.heaterCoolerService.updateCharacteristic(this.platform.Characteristic.CurrentTemperature, this.obj.getCurrentTemp());
-
-      // Optional Characteristics
-      this.heaterCoolerService.updateCharacteristic(this.platform.Characteristic.Name, this.obj.getName());
+      this.thermostatService.updateCharacteristic(this.platform.Characteristic.CurrentTemperature, this.obj.getCurrentTemp());      
+      this.thermostatService.setCharacteristic(this.platform.Characteristic.TargetTemperature, this.obj.getTargetTemperature());
       
-      this.heaterCoolerService.updateCharacteristic(this.platform.Characteristic.SwingMode, 
-        this.obj.getSwingMode() === Swing.on ? this.platform.Characteristic.SwingMode.SWING_ENABLED : 
-          this.platform.Characteristic.SwingMode.SWING_DISABLED);            
+      // Optional Characteristics
+      this.thermostatService.updateCharacteristic(this.platform.Characteristic.Name, this.obj.getName());
 
-      // Light and buttons     
-      this.lightService = this.accessory.getService(this.platform.Service.Lightbulb) ||
-        this.accessory.addService(this.platform.Service.Lightbulb);
+      // Light and buttons
+      this.swingService = this.accessory.getService('Swing') ||
+        this.accessory.addService(this.platform.Service.Switch, 'Swing', 'SWING');
+
+      this.swingService.updateCharacteristic(this.platform.Characteristic.On, this.obj.getSwingMode() === Swing.on);
+
+      this.lightService = this.accessory.getService('Backlight') ||
+        this.accessory.addService(this.platform.Service.Lightbulb, 'Backlight', 'BACKLIGHT');
 
       this.lightService.updateCharacteristic(this.platform.Characteristic.On, this.obj.getLightStatus());
 

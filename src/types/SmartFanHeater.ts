@@ -183,6 +183,9 @@ export class SmartFanHeater {
       return this.TargetTemperature * (9/5) + 32;
     }*/
   }
+  setTargetTemperature(value: number) {
+    this.TargetTemperature = value;
+  }  
   
   getDeviceId() : string {
     return this.DeviceId;
@@ -251,6 +254,10 @@ export class SmartFanHeater {
 
   getMode() : Mode {
     return this.Mode;
+  }
+
+  setMode(value: Mode) {
+    this.Mode = value;
   }
 
   setTemperatureUnit(value: CharacteristicValue) {
