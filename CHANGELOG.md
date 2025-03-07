@@ -2,6 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.26] - 2025-03-07
+- Fix bug on accessory creation
+
 ## [1.0.25] - 2025-03-07
 - Revert ability to set heating threshold temperature
 - Map accessory as thermostat

@@ -59,7 +59,6 @@ export class ThermostatAccessory extends AirControlHandler {
         const args = [...this.args];
         args.push('set', `D03102=${value}`,'-I');
         this.obj.setActive(value as number);
-        this.thermostatService.updateCharacteristic(this.platform.Characteristic.Active, value);        
         await this.sendCommand(args, 60);
       } catch (error) {
         this.handleError(error, `setActive(${value}):`);
@@ -81,7 +80,6 @@ export class ThermostatAccessory extends AirControlHandler {
         const args = [...this.args];
         args.push('set', `D0320F=${(value as number * this.obj.SwingModeSetValue)}`,'-I');
         this.obj.setSwingMode(value as number);
-        this.thermostatService.updateCharacteristic(this.platform.Characteristic.SwingMode, value);        
         await this.sendCommand(args, 60);
       } catch (error) {
         this.handleError(error, `setSwingMode(${value}):`);
@@ -103,7 +101,6 @@ export class ThermostatAccessory extends AirControlHandler {
         const args = [...this.args];
         args.push('set', `D03105=${value}`,'-I');
         this.obj.setLightStatus(value as number);
-        this.lightService.updateCharacteristic(this.platform.Characteristic.On, value);        
         await this.sendCommand(args, 60);
       } catch (error) {
         this.handleError(error, `setLight(${value}):`);
@@ -125,7 +122,6 @@ export class ThermostatAccessory extends AirControlHandler {
         const args = [...this.args];
         args.push('set', `D03130=${(value as number > 0)?100:0}`,'-I');
         this.obj.setBeepStatus(value as number);
-        this.beepService.updateCharacteristic(this.platform.Characteristic.On, value);        
         await this.sendCommand(args, 60);
       } catch (error) {
         this.handleError(error, `setBeep(${value}):`);
@@ -147,7 +143,6 @@ export class ThermostatAccessory extends AirControlHandler {
         const args = [...this.args];
         args.push('set', `D03180=${value}`,'-I');
         this.obj.setAutoPlusAIStatus(value as number);
-        this.autoPlusAIService.updateCharacteristic(this.platform.Characteristic.On, value);        
         await this.sendCommand(args, 60);
       } catch (error) {
         this.handleError(error, `setAutoPlusAI(${value}):`);
@@ -226,7 +221,7 @@ export class ThermostatAccessory extends AirControlHandler {
       this.platform.log.error(`setMode(${value}): No service or object`, this.accessory.displayName);
     }
   }
-  
+
   async setCurrentHeatingCoolingState(value: CharacteristicValue) {
     if (this.thermostatService && this.obj) {
       this.platform.log.debug(`setCurrentHeatingCoolingState(${value})`, this.accessory.displayName);

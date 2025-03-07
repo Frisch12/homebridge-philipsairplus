@@ -122,10 +122,15 @@ export class PhilipsAirPlusPlatform implements DynamicPlatformPlugin {
 
         // create the accessory handler for the newly create accessory
         // this is imported from `platformAccessory.ts`
-        if (deviceType === Categories.AIR_HEATER) {
+        switch (deviceType) {
+        case Categories.AIR_HEATER:
           new HeaterCoolerAccessory(this, accessory);
-        } else {
-          throw new Error('Not implemented!');          
+          break;
+        case Categories.THERMOSTAT:
+          new ThermostatAccessory(this, accessory);
+          break;
+        default:
+          throw new Error('Not implemented!');
         }
 
         // link the accessory to your platform
