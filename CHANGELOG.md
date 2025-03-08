@@ -3,7 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 
-## [2.0.0] - 2025-03-07
+## [2.0.1] - 2025-03-08
+- Improved logging messages
+
+## [2.0.0] - 2025-03-08
 - Major refactoring. Accessories now are mapped to a thermostat with additional switches for other functions: swing, backlight, sounds, Auto+ AI
 
 ## [1.0.26] - 2025-03-07

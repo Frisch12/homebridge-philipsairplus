@@ -113,7 +113,7 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
    */
   async setActive(value: CharacteristicValue) {    
     if (this.thermostatService && this.obj) {
-      this.platform.log.debug(`setActive(${value})`, this.accessory.displayName);
+      this.platform.log.info(`setActive(${value})`, this.accessory.displayName);
     
       try {
         const args = [...this.args];
@@ -134,7 +134,7 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
    */
   async setSwingMode(value: CharacteristicValue) {    
     if (this.thermostatService && this.obj) {
-      this.platform.log.debug(`setSwingMode(${value})`, this.accessory.displayName);
+      this.platform.log.info(`setSwingMode(${value})`, this.accessory.displayName);
     
       try {
         const args = [...this.args];
@@ -155,7 +155,7 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
    */
   async setLight(value: CharacteristicValue) {    
     if (this.lightService && this.obj) {
-      this.platform.log.debug(`setLight(${value})`, this.accessory.displayName);
+      this.platform.log.info(`setLight(${value})`, this.accessory.displayName);
     
       try {
         const args = [...this.args];
@@ -176,7 +176,7 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
    */
   async setBeep(value: CharacteristicValue) {    
     if (this.beepService && this.obj) {
-      this.platform.log.debug(`setBeep(${value})`, this.accessory.displayName);
+      this.platform.log.info(`setBeep(${value})`, this.accessory.displayName);
     
       try {
         const args = [...this.args];
@@ -197,7 +197,7 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
    */
   async setAutoPlusAI(value: CharacteristicValue) {    
     if (this.autoPlusAIService && this.obj) {
-      this.platform.log.debug(`setAutoPlusAI(${value})`, this.accessory.displayName);
+      this.platform.log.info(`setAutoPlusAI(${value})`, this.accessory.displayName);
     
       try {
         const args = [...this.args];
@@ -219,7 +219,7 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
    */
   async setTemperatureUnits(value: CharacteristicValue) {
     if (this.thermostatService && this.obj) {
-      this.platform.log.debug(`setTemperatureUnits(${value})`, this.accessory.displayName);
+      this.platform.log.info(`setTemperatureUnits(${value})`, this.accessory.displayName);
     
       try {
         this.obj.setTemperatureUnit(value as number);
@@ -241,7 +241,7 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
    */
   async setTargetTemperature(value: CharacteristicValue) {    
     if (this.thermostatService && this.obj) {
-      this.platform.log.debug(`setTargetTemperature(${value})`, this.accessory.displayName);
+      this.platform.log.info(`setTargetTemperature(${value})`, this.accessory.displayName);
     
       try {
         const args = [...this.args];
@@ -263,7 +263,7 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
    */
   async setMode(value: Mode) {    
     if (this.thermostatService && this.obj) {
-      this.platform.log.debug(`setMode(${value})`, this.accessory.displayName);
+      this.platform.log.info(`setMode(${value})`, this.accessory.displayName);
       
       try {
         const args = [...this.args];
@@ -280,7 +280,7 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
 
   async setCurrentHeatingCoolingState(value: CharacteristicValue) {
     if (this.thermostatService && this.obj) {
-      this.platform.log.debug(`setCurrentHeatingCoolingState(${value})`, this.accessory.displayName);
+      this.platform.log.info(`setCurrentHeatingCoolingState(${value})`, this.accessory.displayName);
       switch(value){
       case this.platform.Characteristic.CurrentHeatingCoolingState.OFF:
         await this.setActive(this.platform.Characteristic.Active.INACTIVE);
@@ -301,7 +301,7 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
 
   async setTargetHeatingCoolingState(value: CharacteristicValue) {
     if (this.thermostatService && this.obj) {
-      this.platform.log.debug(`setTargetHeatingCoolingState(${value})`, this.accessory.displayName);
+      this.platform.log.info(`setTargetHeatingCoolingState(${value})`, this.accessory.displayName);
 
       switch(value){
       case this.platform.Characteristic.TargetHeatingCoolingState.OFF:
@@ -329,7 +329,11 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
   async onCmdData(data: string) {
     data = data.toString().replace(/\n$/, '');
     this.platform.log.debug('onCmdData:', data, this.accessory.displayName);
-    
+    if (data !== '') {
+      this.platform.log.error('OnCmdData()', data, this.accessory.displayName);
+    } else {
+      this.platform.log.success('OnCmdData()', this.accessory.displayName);
+    }
   }
 
   async onPollData(data: string) {

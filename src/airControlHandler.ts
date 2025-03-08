@@ -62,7 +62,7 @@ export abstract class AirControlHandler {
     return new Promise<void>((resolve, reject) => {
       exec(args.join(' '), (timeoutInSec) ? { timeout: timeoutInSec*60*1000 }: {}, (err, stdout, stderr) => {
         if (err) {
-          this.platform.log.error('CMD error:', stderr, this.accessory.displayName);
+          this.platform.log.error('CMD error:', stderr.toString(), this.accessory.displayName);
           return reject(err);
         }
         if (stdout) {
