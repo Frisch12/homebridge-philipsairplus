@@ -48,21 +48,7 @@
               "condition": {
                 "functionBody": "try { return model.devices[arrayIndices[0]].active } catch(e){ return false }"
               }
-            },
-            "type": {
-              "name": "Type",
-              "type": "string",
-              "required": true,
-              "enum": [
-                "heater",
-                "thermostat"
-              ],
-              "default": "heater",
-              "description": "Set the type of device.",
-              "condition": {
-                "functionBody": "try { return model.devices[arrayIndices[0]].active } catch(e){ return false }"
-              }
-            },
+            },            
             "ip_address": {
               "title": "IP Address",
               "type": "string",
@@ -112,7 +98,6 @@
             "devices[].debug",
             "devices[].deviceId",
             "devices[].name",
-            "devices[].type",
             "devices[].ip_address",
             "devices[].port"
           ]

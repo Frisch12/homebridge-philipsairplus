@@ -12,6 +12,7 @@ export abstract class AirControlHandler {
   ipAddress: IPv4Address;
   port: number;
   debug: boolean = false;
+  displayName: string = '';
   args: Array<string>;
   private airControl: ChildProcess | undefined;
   private shutdown: boolean = false;
@@ -24,6 +25,7 @@ export abstract class AirControlHandler {
     this.port = accessory.context.device.port || 5683;
     this.serialNumber = accessory.context.device.serialNumber || '0000';
     this.debug = accessory.context.device.debug || false;
+    this.displayName = accessory.context.device.name;
     const __filename = fileURLToPath(import.meta.url); // get the resolved path to the file
     const __dirname = path.dirname(__filename); // get the name of the directory
   
@@ -43,8 +45,8 @@ export abstract class AirControlHandler {
     });
   }
 
-  abstract onData(data: string) : Promise<void>;
-  abstract onCmdData(data: string, startPoll: boolean) : Promise<void>;
+  abstract onPollData(data: string) : Promise<void>;
+  abstract onCmdData(data: string) : Promise<void>;
 
   async onStdErrData(error: string) {
     error = error.toString().replace(/\n$/, '');
@@ -55,7 +57,7 @@ export abstract class AirControlHandler {
     this.platform.log.error('onError():', error.message, error.stack, this.accessory.displayName);    
   }
 
-  sendCommand(args: unknown[], timeoutInSec?: number, startPoll: boolean = false) {
+  sendCommand(args: unknown[], timeoutInSec?: number) {
     this.platform.log.debug(`CMD: ${args.join(' ')}`, this.accessory.displayName);
     return new Promise<void>((resolve, reject) => {
       exec(args.join(' '), (timeoutInSec) ? { timeout: timeoutInSec*60*1000 }: {}, (err, stdout, stderr) => {
@@ -65,7 +67,7 @@ export abstract class AirControlHandler {
         }
         if (stdout) {
           this.platform.log.debug('CMD response:', stdout.toString(), this.accessory.displayName);
-          this.onCmdData(stdout, startPoll);
+          this.onCmdData(stdout);
         }
         resolve();
       });
@@ -83,7 +85,7 @@ export abstract class AirControlHandler {
 
     if (this.airControl) {
 
-      this.airControl.stdout?.on('data', this.onData.bind(this));
+      this.airControl.stdout?.on('data', this.onPollData.bind(this));
 
       this.airControl.stderr?.on('data', this.onStdErrData.bind(this));
 

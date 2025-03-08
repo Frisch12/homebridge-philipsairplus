@@ -1,9 +1,8 @@
-import { Categories, type API, type Characteristic, type DynamicPlatformPlugin, 
+import { type API, type Characteristic, type DynamicPlatformPlugin, 
   type Logging, type PlatformAccessory, type PlatformConfig, type Service } from 'homebridge';
 
-import { HeaterCoolerAccessory } from './heaterCoolerAccessory.js';
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js';
-import { ThermostatAccessory } from './thermostatAccessory.js';
+import { SmartFanHeaterAccessory } from './smartFanHeaterAccessory.js';
 
 export enum DeviceType {
   heater,
@@ -76,9 +75,7 @@ export class PhilipsAirPlusPlatform implements DynamicPlatformPlugin {
       // number or MAC address
       const uuid = this.api.hap.uuid.generate(device.deviceId);
 
-      // Device type      
-      const deviceType = (DeviceType[device.type as keyof typeof DeviceType] === DeviceType.heater) ? Categories.AIR_HEATER : Categories.THERMOSTAT;
-
+      
       // see if an accessory with the same uuid has already been registered and restored from
       // the cached devices we stored in the `configureAccessory` method above
       const existingAccessory = this.accessories.get(uuid);              
@@ -94,16 +91,7 @@ export class PhilipsAirPlusPlatform implements DynamicPlatformPlugin {
 
         // create the accessory handler for the restored accessory
         // this is imported from `platformAccessory.ts`
-        switch (deviceType) {
-        case Categories.AIR_HEATER:
-          new HeaterCoolerAccessory(this, existingAccessory);
-          break;
-        case Categories.THERMOSTAT:
-          new ThermostatAccessory(this, existingAccessory);
-          break;
-        default:
-          throw new Error('Not implemented!');
-        }
+        new SmartFanHeaterAccessory(this, existingAccessory);
         
         // it is possible to remove platform accessories at any time using `api.unregisterPlatformAccessories`, e.g.:
         // remove platform accessories when no longer present
@@ -114,7 +102,7 @@ export class PhilipsAirPlusPlatform implements DynamicPlatformPlugin {
         this.log.info('Adding new accessory:', device.name);
 
         // create a new accessory
-        const accessory = new this.api.platformAccessory(device.name, uuid, deviceType);
+        const accessory = new this.api.platformAccessory(device.name, uuid);
 
         // store a copy of the device object in the `accessory.context`
         // the `context` property can be used to store any data about the accessory you may need
@@ -122,17 +110,8 @@ export class PhilipsAirPlusPlatform implements DynamicPlatformPlugin {
 
         // create the accessory handler for the newly create accessory
         // this is imported from `platformAccessory.ts`
-        switch (deviceType) {
-        case Categories.AIR_HEATER:
-          new HeaterCoolerAccessory(this, accessory);
-          break;
-        case Categories.THERMOSTAT:
-          new ThermostatAccessory(this, accessory);
-          break;
-        default:
-          throw new Error('Not implemented!');
-        }
-
+        new SmartFanHeaterAccessory(this, accessory);
+        
         // link the accessory to your platform
         this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
       }
