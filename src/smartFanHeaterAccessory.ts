@@ -39,8 +39,8 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
     this.accessory.getService(this.platform.Service.AccessoryInformation)!
       .setCharacteristic(this.platform.Characteristic.Manufacturer, this.manufacturer)
       .setCharacteristic(this.platform.Characteristic.SerialNumber, this.serialNumber)
-      .setCharacteristic(this.platform.Characteristic.FirmwareRevision, this.obj!.getFirmware())
-      .setCharacteristic(this.platform.Characteristic.Model, this.obj!.getModel());
+      .setCharacteristic(this.platform.Characteristic.FirmwareRevision, '')
+      .setCharacteristic(this.platform.Characteristic.Model, '');
     
     // Thermostat
     this.thermostatService = this.accessory.getService(this.platform.Service.Thermostat) || 
