@@ -60,6 +60,7 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
     
     this.thermostatService.setCharacteristic(this.platform.Characteristic.TargetTemperature, 0);
     this.thermostatService.getCharacteristic(this.platform.Characteristic.TargetTemperature)
+      .setProps({ minStep: 1 })
       .onSet(this.setTargetTemperature.bind(this));
     
     this.thermostatService.setCharacteristic(this.platform.Characteristic.TemperatureDisplayUnits,
@@ -338,6 +339,7 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
 
   async onPollData(data: string) {
     data = data.toString().replace(/\n$/, '');
+    this.platform.log.info('onPollData', this.accessory.displayName);
     this.platform.log.debug(`onPollData: ${data}`, this.accessory.displayName);
     try {
       // Update object
