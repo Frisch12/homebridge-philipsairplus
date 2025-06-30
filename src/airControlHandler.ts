@@ -1,7 +1,7 @@
 import { ChildProcess, exec, spawn } from 'node:child_process';
 import { IPv4Address, PlatformAccessory } from 'homebridge';
 
-import { PhilipsAirPlusPlatform } from './platform';
+import { PhilipsAirPlusPlatform } from './platform.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
