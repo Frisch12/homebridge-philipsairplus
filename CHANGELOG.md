@@ -2,7 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
-## [2.0.2] - 2025-03-08
+
+## [2.0.4] - 2025-06-30
+- Updated dependencies
+
+## [2.0.3] - 2025-03-08
 - Fixed temperature step to be 1°
 - Added additional logging for longPoll callback
 
