@@ -40,7 +40,7 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
       .setCharacteristic(this.platform.Characteristic.Manufacturer, this.manufacturer)
       .setCharacteristic(this.platform.Characteristic.SerialNumber, this.serialNumber)
       .setCharacteristic(this.platform.Characteristic.FirmwareRevision, '')
-      .setCharacteristic(this.platform.Characteristic.Model, '');
+      .setCharacteristic(this.platform.Characteristic.Model, 'Philips Air+ Smart Fan Heater');
     
     // Thermostat
     this.thermostatService = this.accessory.getService(this.platform.Service.Thermostat) || 
@@ -58,7 +58,7 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
     
     this.thermostatService.setCharacteristic(this.platform.Characteristic.CurrentTemperature, 0);
     
-    this.thermostatService.setCharacteristic(this.platform.Characteristic.TargetTemperature, 0);
+    this.thermostatService.setCharacteristic(this.platform.Characteristic.TargetTemperature, 20);
     this.thermostatService.getCharacteristic(this.platform.Characteristic.TargetTemperature)
       .setProps({ minStep: 1 })
       .onSet(this.setTargetTemperature.bind(this));
