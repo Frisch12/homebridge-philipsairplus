@@ -2,6 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.0.6] - 2025-11-23
+- Update dependencies
+
 ## [2.0.5] - 2025-06-30
 - Fix module resolution (reported: https://github.com/homebridge/homebridge-plugin-template/issues/84)
 
