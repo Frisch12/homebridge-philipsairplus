@@ -2,6 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.0.9] - 2025-11-25
+- Update dependencies
+
 ## [2.0.8] - 2025-11-23
 - Update dependencies
 - Fix device initiation to respect characteristics accepted values
