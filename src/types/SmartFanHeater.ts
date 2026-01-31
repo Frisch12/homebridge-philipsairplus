@@ -26,7 +26,7 @@ export interface SwingConfig {
 
 export const SWING_CONFIG: Record<DeviceModel, SwingConfig> = {
   [DeviceModel.CX5120]: { onValue: 17920, setMultiplier: 17222 },
-  [DeviceModel.CX3120]: { onValue: 45, setMultiplier: 45 }
+  [DeviceModel.CX3120]: { onValue: 45, setMultiplier: 45 },
 };
 
 export enum TemperatureUnit {
