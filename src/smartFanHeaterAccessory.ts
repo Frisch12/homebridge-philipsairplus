@@ -2,7 +2,7 @@ import { PlatformAccessory, Service, type CharacteristicValue } from 'homebridge
 
 import { PhilipsAirPlusPlatform } from './platform.js';
 import { AirControlHandler } from './airControlHandler.js';
-import { Mode, SmartFanHeater, Swing } from './types/SmartFanHeater.js';
+import { DeviceModel, Mode, SmartFanHeater } from './types/SmartFanHeater.js';
 
 /**
  * Platform Accessory
@@ -10,19 +10,29 @@ import { Mode, SmartFanHeater, Swing } from './types/SmartFanHeater.js';
  * Each accessory may expose multiple services of different service types.
  */
 export class SmartFanHeaterAccessory extends AirControlHandler {
-  private thermostatService: Service | undefined; 
+  private thermostatService: Service | undefined;
   private swingService: Service | undefined;
   private lightService: Service | undefined;
   private beepService: Service | undefined;
   private autoPlusAIService: Service | undefined;
   private obj?: SmartFanHeater = undefined;
 
+  // Configuration options
+  private enableBacklight: boolean;
+  private deviceModelOverride?: DeviceModel;
+
   constructor(
     public readonly platform: PhilipsAirPlusPlatform,
     public readonly accessory: PlatformAccessory,
   ) {
     super(platform, accessory);
-    this.initAccessory();    
+
+    // Read configuration options
+    const device = accessory.context.device;
+    this.enableBacklight = device.enableBacklight ?? true;
+    this.deviceModelOverride = device.model as DeviceModel | undefined;
+
+    this.initAccessory();
   }
 
   handleError(error: unknown, message?: string) {
@@ -79,13 +89,22 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
     this.swingService.getCharacteristic(this.platform.Characteristic.On)
       .onSet(this.setSwingMode.bind(this));
 
-    // Backlight
-    this.lightService = this.accessory.getService('Backlight') ||
-      this.accessory.addService(this.platform.Service.Lightbulb, 'Backlight', 'BACKLIGHT');
-    
-    this.lightService.setCharacteristic(this.platform.Characteristic.On, false);
-    this.lightService.getCharacteristic(this.platform.Characteristic.On)
-      .onSet(this.setLight.bind(this));
+    // Backlight (optional - not available on all models like CX3120)
+    if (this.enableBacklight) {
+      this.lightService = this.accessory.getService('Backlight') ||
+        this.accessory.addService(this.platform.Service.Lightbulb, 'Backlight', 'BACKLIGHT');
+
+      this.lightService.setCharacteristic(this.platform.Characteristic.On, false);
+      this.lightService.getCharacteristic(this.platform.Characteristic.On)
+        .onSet(this.setLight.bind(this));
+    } else {
+      // Remove the service if it exists but is disabled
+      const existingService = this.accessory.getService('Backlight');
+      if (existingService) {
+        this.platform.log.info('Removing Backlight service (disabled in config)', this.accessory.displayName);
+        this.accessory.removeService(existingService);
+      }
+    }
 
 
     // Beep switch
@@ -133,14 +152,16 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
    * Handle "SET" requests from HomeKit
    * These are sent when the user changes the state of an accessory, for example, turning on a Light bulb.
    */
-  async setSwingMode(value: CharacteristicValue) {    
+  async setSwingMode(value: CharacteristicValue) {
     if (this.thermostatService && this.obj) {
       this.platform.log.info(`setSwingMode(${value})`, this.accessory.displayName);
-    
+
       try {
         const args = [...this.args];
-        args.push('set', `D0320F=${(value as number * this.obj.SwingModeSetValue)}`,'-I');
-        this.obj.setSwingMode(value as number);
+        const enabled = value as boolean;
+        const swingValue = enabled ? this.obj.swingConfig.setMultiplier : 0;
+        args.push('set', `D0320F=${swingValue}`, '-I');
+        this.obj.setSwingMode(enabled);
         await this.sendCommand(args, 60);
       } catch (error) {
         this.handleError(error, `setSwingMode(${value}):`);
@@ -346,7 +367,8 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
       if (this.obj) {
         this.obj.updateObj(data);
       } else {
-        this.obj = new SmartFanHeater(this.platform, data);        
+        this.obj = new SmartFanHeater(this.platform, data, this.deviceModelOverride);
+        this.platform.log.info(`Device model detected: ${this.obj.getDeviceModel()}`, this.accessory.displayName);
       }
 
       // update accessory information
@@ -389,9 +411,11 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
       this.thermostatService!.updateCharacteristic(this.platform.Characteristic.Name, this.obj.getName());
 
       // Light and buttons
-      this.swingService!.updateCharacteristic(this.platform.Characteristic.On, this.obj.getSwingMode() === Swing.on);
+      this.swingService!.updateCharacteristic(this.platform.Characteristic.On, this.obj.isSwingEnabled());
 
-      this.lightService!.updateCharacteristic(this.platform.Characteristic.On, this.obj.getLightStatus());
+      if (this.lightService) {
+        this.lightService.updateCharacteristic(this.platform.Characteristic.On, this.obj.getLightStatus());
+      }
 
       this.beepService!.updateCharacteristic(this.platform.Characteristic.On, this.obj.getBeepStatus());
       

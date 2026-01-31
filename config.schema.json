@@ -68,6 +68,29 @@
               "condition": {
                 "functionBody": "try { return model.devices[arrayIndices[0]].active } catch(e){ return false }"
               }
+            },
+            "model": {
+              "title": "Device Model",
+              "type": "string",
+              "oneOf": [
+                { "title": "Auto-detect", "enum": [""] },
+                { "title": "CX5120", "enum": ["CX5120"] },
+                { "title": "CX3120", "enum": ["CX3120"] }
+              ],
+              "default": "",
+              "description": "Device model. Auto-detect will determine the model from the device response.",
+              "condition": {
+                "functionBody": "try { return model.devices[arrayIndices[0]].active } catch(e){ return false }"
+              }
+            },
+            "enableBacklight": {
+              "title": "Enable Backlight Control",
+              "type": "boolean",
+              "default": true,
+              "description": "Enable the backlight control service. Disable this for models that don't support it (e.g., CX3120).",
+              "condition": {
+                "functionBody": "try { return model.devices[arrayIndices[0]].active } catch(e){ return false }"
+              }
             }
           }
         }
@@ -99,7 +122,9 @@
             "devices[].deviceId",
             "devices[].name",
             "devices[].ip_address",
-            "devices[].port"
+            "devices[].port",
+            "devices[].model",
+            "devices[].enableBacklight"
           ]
         }
       ]
