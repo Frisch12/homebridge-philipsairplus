@@ -43,8 +43,7 @@
             "deviceId": {
               "title": "Device Id",
               "type": "string",
-              "required": true,
-              "description": "Device unique id",
+              "description": "Device unique id. Leave empty for auto-detection from IP address.",
               "condition": {
                 "functionBody": "try { return model.devices[arrayIndices[0]].active } catch(e){ return false }"
               }
