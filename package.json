@@ -2,7 +2,7 @@
   "name": "homebridge-philipsairplus-platform-jeko",
   "displayName": "Philips Air+ (Jeko)",
   "type": "module",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "Homebridge plugin for Philips Air+ Smart Fan Heater (CX3120, CX5120).",
   "author": "Jeko (fork of André Vieira's plugin)",
   "license": "MIT",

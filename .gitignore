@@ -124,3 +124,6 @@ dist
 .idea
 
 /test/hbConfig
+
+# Test JSON states
+_json_states/

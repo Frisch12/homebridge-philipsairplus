@@ -19,6 +19,7 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
 
   // Configuration options
   private enableBacklight: boolean;
+  private enableBeep: boolean;
   private deviceModelOverride?: DeviceModel;
 
   constructor(
@@ -30,7 +31,15 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
     // Read configuration options
     const device = accessory.context.device;
     this.enableBacklight = device.enableBacklight ?? true;
-    this.deviceModelOverride = device.model as DeviceModel | undefined;
+    this.enableBeep = device.enableBeep ?? true;
+    // "auto" means auto-detect, so we don't set an override
+    this.deviceModelOverride = (device.model && device.model !== 'auto') ? device.model as DeviceModel : undefined;
+
+    // Auto-disable features not supported by CX3120
+    if (this.deviceModelOverride === DeviceModel.CX3120) {
+      this.enableBacklight = false;
+      // Beep is supported on CX3120
+    }
 
     this.initAccessory();
   }
@@ -81,9 +90,14 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
 
     this.thermostatService.setCharacteristic(this.platform.Characteristic.Name, this.displayName);
       
-    // Swith switch
-    this.swingService = this.accessory.getService('Swing') ||
-      this.accessory.addService(this.platform.Service.Switch, 'Swing', 'SWING');
+    // Swing/Oscillation switch
+    // Remove old service if exists with old name
+    const oldSwingService = this.accessory.getService('Swing');
+    if (oldSwingService) {
+      this.accessory.removeService(oldSwingService);
+    }
+    this.swingService = this.accessory.getService('Oscillation') ||
+      this.accessory.addService(this.platform.Service.Switch, 'Oscillation', 'SWING');
 
     this.swingService.setCharacteristic(this.platform.Characteristic.On, false);
     this.swingService.getCharacteristic(this.platform.Characteristic.On)
@@ -107,17 +121,31 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
     }
 
 
-    // Beep switch
-    this.beepService = this.accessory.getService('Beep') ||
-      this.accessory.addService(this.platform.Service.Switch, 'Beep', 'BEEP');
+    // Beep switch (optional - not available on all models like CX3120)
+    if (this.enableBeep) {
+      this.beepService = this.accessory.getService('Beep') ||
+        this.accessory.addService(this.platform.Service.Switch, 'Beep', 'BEEP');
 
-    this.beepService.setCharacteristic(this.platform.Characteristic.On, false);
-    this.beepService.getCharacteristic(this.platform.Characteristic.On)
-      .onSet(this.setBeep.bind(this));
-    
+      this.beepService.setCharacteristic(this.platform.Characteristic.On, false);
+      this.beepService.getCharacteristic(this.platform.Characteristic.On)
+        .onSet(this.setBeep.bind(this));
+    } else {
+      // Remove the service if it exists but is disabled
+      const existingBeepService = this.accessory.getService('Beep');
+      if (existingBeepService) {
+        this.platform.log.info('Removing Beep service (disabled or not supported)', this.accessory.displayName);
+        this.accessory.removeService(existingBeepService);
+      }
+    }
+
     // Auto+ AI switch
-    this.autoPlusAIService = this.accessory.getService('Auto Plus AI') ||
-      this.accessory.addService(this.platform.Service.Switch, 'Auto Plus AI', 'AUTO_PLUS_AI');
+    // Remove old service if exists with old name
+    const oldAutoPlusService = this.accessory.getService('Auto Plus AI');
+    if (oldAutoPlusService) {
+      this.accessory.removeService(oldAutoPlusService);
+    }
+    this.autoPlusAIService = this.accessory.getService('Auto+') ||
+      this.accessory.addService(this.platform.Service.Switch, 'Auto+', 'AUTO_PLUS_AI');
 
     this.autoPlusAIService.setCharacteristic(this.platform.Characteristic.On, false);
     this.autoPlusAIService.getCharacteristic(this.platform.Characteristic.On)
@@ -417,8 +445,10 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
         this.lightService.updateCharacteristic(this.platform.Characteristic.On, this.obj.getLightStatus());
       }
 
-      this.beepService!.updateCharacteristic(this.platform.Characteristic.On, this.obj.getBeepStatus());
-      
+      if (this.beepService) {
+        this.beepService.updateCharacteristic(this.platform.Characteristic.On, this.obj.getBeepStatus());
+      }
+
       this.autoPlusAIService!.updateCharacteristic(this.platform.Characteristic.On, this.obj.getAutoPlusAIStatus());
 
     } catch(error) {

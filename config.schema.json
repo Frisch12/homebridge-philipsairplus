@@ -73,11 +73,11 @@
               "title": "Device Model",
               "type": "string",
               "oneOf": [
-                { "title": "Auto-detect", "enum": [""] },
+                { "title": "Auto-detect", "enum": ["auto"] },
                 { "title": "CX5120", "enum": ["CX5120"] },
                 { "title": "CX3120", "enum": ["CX3120"] }
               ],
-              "default": "",
+              "default": "auto",
               "description": "Device model. Auto-detect will determine the model from the device response.",
               "condition": {
                 "functionBody": "try { return model.devices[arrayIndices[0]].active } catch(e){ return false }"
@@ -87,7 +87,16 @@
               "title": "Enable Backlight Control",
               "type": "boolean",
               "default": true,
-              "description": "Enable the backlight control service. Disable this for models that don't support it (e.g., CX3120).",
+              "description": "Enable the backlight control service. Automatically disabled for CX3120.",
+              "condition": {
+                "functionBody": "try { return model.devices[arrayIndices[0]].active && model.devices[arrayIndices[0]].model !== 'CX3120' } catch(e){ return false }"
+              }
+            },
+            "enableBeep": {
+              "title": "Enable Beep Control",
+              "type": "boolean",
+              "default": true,
+              "description": "Enable the beep control service.",
               "condition": {
                 "functionBody": "try { return model.devices[arrayIndices[0]].active } catch(e){ return false }"
               }
@@ -124,7 +133,8 @@
             "devices[].ip_address",
             "devices[].port",
             "devices[].model",
-            "devices[].enableBacklight"
+            "devices[].enableBacklight",
+            "devices[].enableBeep"
           ]
         }
       ]
