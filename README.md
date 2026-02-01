@@ -2,20 +2,15 @@
     <img src="images/logo.png" height="200">
 </p>
 
-# homebridge-philipsairplus-platform
+<h1 align="center">homebridge-philipsairplus-platform</h1>
 
-<!--
-[![npm](https://img.shields.io/npm/v/homebridge-philipsair-platform.svg?style=flat-square)](https://www.npmjs.com/package/homebridge-philipsair-platform)
-[![npm](https://img.shields.io/npm/dt/homebridge-philipsair-platform.svg?style=flat-square)](https://www.npmjs.com/package/homebridge-philipsair-platform)
-[![GitHub last commit](https://img.shields.io/github/last-commit/SeydX/homebridge-philipsair-platform.svg?style=flat-square)](https://github.com/SeydX/homebridge-philipsair-platform)
-[![verified-by-homebridge](https://badgen.net/badge/homebridge/verified/purple)](https://github.com/homebridge/homebridge/wiki/Verified-Plugins)
-[![Discord](https://img.shields.io/discord/432663330281226270?color=728ED5&logo=discord&label=discord)](https://discord.gg/kqNCe2D)
-[![Donate](https://img.shields.io/badge/Donate-PayPal-blue.svg?style=flat-square&maxAge=2592000)](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=NP4T3KASWQLD8)
+<p align="center">
+  <a href="https://www.npmjs.com/package/homebridge-philipsair-platform"><img src="https://img.shields.io/npm/v/homebridge-philipsair-platform.svg?style=flat-square" alt="npm version"></a>
+  <a href="https://www.npmjs.com/package/homebridge-philipsair-platform"><img src="https://img.shields.io/npm/dt/homebridge-philipsair-platform.svg?style=flat-square" alt="npm downloads"></a>
+  <a href="https://github.com/homebridge/homebridge/wiki/Verified-Plugins"><img src="https://badgen.net/badge/homebridge/verified/purple" alt="verified-by-homebridge"></a>
+</p>
 
-**Creating and maintaining Homebridge plugins consume a lot of time and effort, if you would like to share your appreciation, feel free to "Star" or donate.**
--->
-
-This is a plugin for Philips Air+ Smart Tower Heaters.
+<p align="center">A Homebridge plugin for Philips Air+ Smart Tower Heaters.</p>
 
 ## Installation
 
