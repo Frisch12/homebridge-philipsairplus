@@ -16,6 +16,7 @@ export abstract class AirControlHandler {
   args: Array<string>;
   private airControl: ChildProcess | undefined;
   private shutdown: boolean = false;
+  private dataBuffer: string = '';
 
   constructor(
         public readonly platform: PhilipsAirPlusPlatform,
@@ -85,7 +86,20 @@ export abstract class AirControlHandler {
 
     if (this.airControl) {
 
-      this.airControl.stdout?.on('data', this.onPollData.bind(this));
+      this.airControl.stdout?.on('data', (data: Buffer) => {
+        this.dataBuffer += data.toString();
+
+        // Process complete lines (each line should be a complete JSON object)
+        let newlineIndex: number;
+        while ((newlineIndex = this.dataBuffer.indexOf('\n')) !== -1) {
+          const line = this.dataBuffer.substring(0, newlineIndex).trim();
+          this.dataBuffer = this.dataBuffer.substring(newlineIndex + 1);
+
+          if (line) {
+            this.onPollData(line);
+          }
+        }
+      });
 
       this.airControl.stderr?.on('data', this.onStdErrData.bind(this));
 
@@ -112,6 +126,7 @@ export abstract class AirControlHandler {
       this.platform.log.debug('Killing airControl process', this.accessory.displayName);
       this.airControl.kill();
       this.airControl = undefined;
+      this.dataBuffer = '';
     }
   }
   
