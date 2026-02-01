@@ -388,7 +388,7 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
 
   async onPollData(data: string) {
     data = data.toString().replace(/\n$/, '');
-    this.platform.log.info('onPollData', this.accessory.displayName);
+    this.platform.log.debug('onPollData', this.accessory.displayName);
     this.platform.log.debug(`onPollData: ${data}`, this.accessory.displayName);
     try {
       // Update object

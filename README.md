@@ -181,6 +181,9 @@ This plugin has been verified to work with the following apps/systems:
 
 > This project is heavily inspired by Seydx's [homebridge-philipsair-platform](https://github.com/SeydX/homebridge-philipsair-platform) and - Since the plugin didn't support heaters and coolers I extended it. The **homebridge-philips-air** was a very great help for the implementation!
 
+**Contributors:**
+- [Jeko](https://github.com/jeko) - CX3120 support, auto-detection of deviceId, phipsair verification, UI improvements
+
 You can contribute to this homebridge plugin in following ways:
 
 - Report issues and help verify fixes as they are checked in.
