@@ -1,8 +1,12 @@
-import { type API, type Characteristic, type DynamicPlatformPlugin, 
+import { type API, type Characteristic, type DynamicPlatformPlugin,
   type Logging, type PlatformAccessory, type PlatformConfig, type Service } from 'homebridge';
+import { exec } from 'node:child_process';
+import { promisify } from 'node:util';
 
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js';
 import { SmartFanHeaterAccessory } from './smartFanHeaterAccessory.js';
+
+const execAsync = promisify(exec);
 
 export enum DeviceType {
   heater,
@@ -22,6 +26,9 @@ export class PhilipsAirPlusPlatform implements DynamicPlatformPlugin {
   public readonly accessories: Map<string, PlatformAccessory> = new Map();
   public readonly discoveredCacheUUIDs: string[] = [];
 
+  // Flag to track if phipsair is available
+  private phipsairAvailable: boolean = false;
+
   constructor(
     public readonly log: Logging,
     public readonly config: PlatformConfig,
@@ -30,7 +37,7 @@ export class PhilipsAirPlusPlatform implements DynamicPlatformPlugin {
     this.Service = api.hap.Service;
     this.Characteristic = api.hap.Characteristic;
 
-    log.debug('Config:',JSON.stringify(config));
+    log.debug('Config:', JSON.stringify(config));
 
     log.debug('Finished initializing platform:', this.config.name);
 
@@ -38,11 +45,66 @@ export class PhilipsAirPlusPlatform implements DynamicPlatformPlugin {
     // Dynamic Platform plugins should only register new accessories after this event was fired,
     // in order to ensure they weren't added to homebridge already. This event can also be used
     // to start discovery of new accessories.
-    this.api.on('didFinishLaunching', () => {
+    this.api.on('didFinishLaunching', async () => {
       log.debug('Executed didFinishLaunching callback');
+
+      // Check if phipsair is installed
+      this.phipsairAvailable = await this.checkPhipsair();
+
+      if (!this.phipsairAvailable) {
+        log.error('phipsair is not installed! Please install it with: pip3 install phipsair');
+        log.error('The plugin will not work without phipsair.');
+        return;
+      }
+
       // run the method to discover / register your devices as accessories
-      this.discoverDevices();
-    });    
+      await this.discoverDevices();
+    });
+  }
+
+  /**
+   * Check if phipsair is installed and available
+   */
+  async checkPhipsair(): Promise<boolean> {
+    try {
+      await execAsync('which phipsair');
+      this.log.info('phipsair found');
+      return true;
+    } catch {
+      // Try with python module check as fallback
+      try {
+        await execAsync('python3 -c "import phipsair"');
+        this.log.info('phipsair module found');
+        return true;
+      } catch {
+        return false;
+      }
+    }
+  }
+
+  /**
+   * Fetch device info from IP address using phipsair
+   */
+  async fetchDeviceInfo(ipAddress: string, port: number = 5683): Promise<{ deviceId: string; model: string } | null> {
+    try {
+      this.log.info(`Fetching device info from ${ipAddress}:${port}...`);
+      const { stdout } = await execAsync(`phipsair -H ${ipAddress} -P ${port} status -J`, { timeout: 30000 });
+
+      const data = JSON.parse(stdout);
+
+      if (data.DeviceId) {
+        this.log.info(`Device detected: ${data.D01S05} (ID: ${data.DeviceId})`);
+        return {
+          deviceId: data.DeviceId,
+          model: data.D01S05 || 'Unknown',
+        };
+      }
+
+      return null;
+    } catch (error) {
+      this.log.error(`Failed to fetch device info from ${ipAddress}:`, (error as Error).message);
+      return null;
+    }
   }
 
   /**
@@ -61,7 +123,7 @@ export class PhilipsAirPlusPlatform implements DynamicPlatformPlugin {
    * Accessories must only be registered once, previously created accessories
    * must not be registered again to prevent "duplicate UUID" errors.
    */
-  discoverDevices() {
+  async discoverDevices() {
     // loop over the discovered devices and register each one if it has not already been registered
     for (const device of this.config.devices) {
       this.log.debug('Processing device:', JSON.stringify(device));
@@ -70,15 +132,36 @@ export class PhilipsAirPlusPlatform implements DynamicPlatformPlugin {
         this.log.debug('Device inactive, continuing...');
         continue;
       }
+
+      // Auto-detect deviceId if not provided
+      let deviceId = device.deviceId;
+      if (!deviceId && device.ip_address) {
+        this.log.info(`No deviceId provided for ${device.name}, attempting auto-detection...`);
+        const info = await this.fetchDeviceInfo(device.ip_address, device.port || 5683);
+        if (info) {
+          deviceId = info.deviceId;
+          device.deviceId = deviceId; // Store for future use
+          this.log.info(`Auto-detected deviceId: ${deviceId}`);
+        } else {
+          this.log.error(`Failed to auto-detect deviceId for ${device.name}. Please check the IP address or provide deviceId manually.`);
+          continue;
+        }
+      }
+
+      if (!deviceId) {
+        this.log.error(`No deviceId for ${device.name} and no ip_address to auto-detect. Skipping.`);
+        continue;
+      }
+
       // generate a unique id for the accessory this should be generated from
       // something globally unique, but constant, for example, the device serial
       // number or MAC address
-      const uuid = this.api.hap.uuid.generate(device.deviceId);
+      const uuid = this.api.hap.uuid.generate(deviceId);
 
-      
+
       // see if an accessory with the same uuid has already been registered and restored from
       // the cached devices we stored in the `configureAccessory` method above
-      const existingAccessory = this.accessories.get(uuid);              
+      const existingAccessory = this.accessories.get(uuid);
 
       if (existingAccessory) {
         // the accessory already exists
@@ -86,13 +169,13 @@ export class PhilipsAirPlusPlatform implements DynamicPlatformPlugin {
 
         // if you need to update the accessory.context then you should run `api.updatePlatformAccessories`. e.g.:
         this.log.debug('Updating existing accessory from cache:', JSON.stringify(existingAccessory.context.device), JSON.stringify(device));
-        existingAccessory.context.device = device;        
+        existingAccessory.context.device = device;
         this.api.updatePlatformAccessories([existingAccessory]);
 
         // create the accessory handler for the restored accessory
         // this is imported from `platformAccessory.ts`
         new SmartFanHeaterAccessory(this, existingAccessory);
-        
+
         // it is possible to remove platform accessories at any time using `api.unregisterPlatformAccessories`, e.g.:
         // remove platform accessories when no longer present
         // this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [existingAccessory]);
@@ -111,7 +194,7 @@ export class PhilipsAirPlusPlatform implements DynamicPlatformPlugin {
         // create the accessory handler for the newly create accessory
         // this is imported from `platformAccessory.ts`
         new SmartFanHeaterAccessory(this, accessory);
-        
+
         // link the accessory to your platform
         this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
       }

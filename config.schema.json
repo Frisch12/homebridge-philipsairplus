@@ -43,8 +43,7 @@
             "deviceId": {
               "title": "Device Id",
               "type": "string",
-              "required": true,
-              "description": "Device unique id",
+              "description": "Device unique id. Leave empty for auto-detection from IP address.",
               "condition": {
                 "functionBody": "try { return model.devices[arrayIndices[0]].active } catch(e){ return false }"
               }
@@ -65,6 +64,38 @@
               "type": "integer",
               "placeholder": 5683,
               "description": "Port of your device.",
+              "condition": {
+                "functionBody": "try { return model.devices[arrayIndices[0]].active } catch(e){ return false }"
+              }
+            },
+            "model": {
+              "title": "Device Model",
+              "type": "string",
+              "oneOf": [
+                { "title": "Auto-detect", "enum": ["auto"] },
+                { "title": "CX5120", "enum": ["CX5120"] },
+                { "title": "CX3120", "enum": ["CX3120"] }
+              ],
+              "default": "auto",
+              "description": "Device model. Auto-detect will determine the model from the device response.",
+              "condition": {
+                "functionBody": "try { return model.devices[arrayIndices[0]].active } catch(e){ return false }"
+              }
+            },
+            "enableBacklight": {
+              "title": "Enable Backlight Control",
+              "type": "boolean",
+              "default": true,
+              "description": "Enable the backlight control service. Automatically disabled for CX3120.",
+              "condition": {
+                "functionBody": "try { return model.devices[arrayIndices[0]].active && model.devices[arrayIndices[0]].model !== 'CX3120' } catch(e){ return false }"
+              }
+            },
+            "enableBeep": {
+              "title": "Enable Beep Control",
+              "type": "boolean",
+              "default": true,
+              "description": "Enable the beep control service.",
               "condition": {
                 "functionBody": "try { return model.devices[arrayIndices[0]].active } catch(e){ return false }"
               }
@@ -99,7 +130,10 @@
             "devices[].deviceId",
             "devices[].name",
             "devices[].ip_address",
-            "devices[].port"
+            "devices[].port",
+            "devices[].model",
+            "devices[].enableBacklight",
+            "devices[].enableBeep"
           ]
         }
       ]

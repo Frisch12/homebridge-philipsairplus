@@ -2,9 +2,9 @@
   "name": "homebridge-philipsairplus-platform",
   "displayName": "Philips Air+",
   "type": "module",
-  "version": "2.0.9",
-  "description": "A short description about what your plugin does.",
-  "author": "André Vieira (https://github.com/agmv/homebridge-philipsairplus-platform)",
+  "version": "2.1.0",
+  "description": "Homebridge plugin for Philips Air+ Smart Fan Heater (CX3120, CX5120).",
+  "author": "André Vieira",
   "license": "MIT",
   "homepage": "https://github.com/agmv/homebridge-philipsairplus-platform#readme",
   "repository": {
