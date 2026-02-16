@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.0] - 2026-02-16
+- Update dependencies
+- Merge [PR#119](https://github.com/agmv/homebridge-philipsairplus-platform/pull/119) from [Jeko](https://github.com/LeJeko) 
+
 ## [2.0.9] - 2025-11-25
 - Update dependencies
 
