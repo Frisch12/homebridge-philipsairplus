@@ -127,3 +127,10 @@ dist
 
 # Test JSON states
 _json_states/
+
+# Python bytecode (daemon helpers)
+__pycache__/
+*.pyc
+
+# Local AI task notes (may contain device IDs / network details)
+.claude/

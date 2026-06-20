@@ -164,10 +164,8 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
       this.platform.log.info(`setActive(${value})`, this.accessory.displayName);
     
       try {
-        const args = [...this.args];
-        args.push('set', `D03102=${value}`,'-I');
         this.obj.setActive(value as number);
-        await this.sendCommand(args, 60);
+        this.sendSet({ D03102: Number(value) });
       } catch (error) {
         this.handleError(error, `setActive(${value}):`);
       }
@@ -185,12 +183,10 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
       this.platform.log.info(`setSwingMode(${value})`, this.accessory.displayName);
 
       try {
-        const args = [...this.args];
         const enabled = value as boolean;
         const swingValue = enabled ? this.obj.swingConfig.setMultiplier : 0;
-        args.push('set', `D0320F=${swingValue}`, '-I');
         this.obj.setSwingMode(enabled);
-        await this.sendCommand(args, 60);
+        this.sendSet({ D0320F: swingValue });
       } catch (error) {
         this.handleError(error, `setSwingMode(${value}):`);
       }
@@ -208,10 +204,8 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
       this.platform.log.info(`setLight(${value})`, this.accessory.displayName);
     
       try {
-        const args = [...this.args];
-        args.push('set', `D03105=${value}`,'-I');
         this.obj.setLightStatus(value as number);
-        await this.sendCommand(args, 60);
+        this.sendSet({ D03105: Number(value) });
       } catch (error) {
         this.handleError(error, `setLight(${value}):`);
       }
@@ -229,10 +223,9 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
       this.platform.log.info(`setBeep(${value})`, this.accessory.displayName);
     
       try {
-        const args = [...this.args];
-        args.push('set', `D03130=${(value as number > 0)?100:0}`,'-I');
+        const wire = (value as number) > 0 ? 100 : 0;
         this.obj.setBeepStatus(value as number);
-        await this.sendCommand(args, 60);
+        this.sendSet({ D03130: wire });
       } catch (error) {
         this.handleError(error, `setBeep(${value}):`);
       }
@@ -250,10 +243,8 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
       this.platform.log.info(`setAutoPlusAI(${value})`, this.accessory.displayName);
     
       try {
-        const args = [...this.args];
-        args.push('set', `D03180=${value}`,'-I');
         this.obj.setAutoPlusAIStatus(value as number);
-        await this.sendCommand(args, 60);
+        this.sendSet({ D03180: Number(value) });
       } catch (error) {
         this.handleError(error, `setAutoPlusAI(${value}):`);
       }
@@ -294,10 +285,8 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
       this.platform.log.info(`setTargetTemperature(${value})`, this.accessory.displayName);
     
       try {
-        const args = [...this.args];
-        args.push('set', `D0310E=${value}`,'-I');
         this.obj.setTargetTemperature(value as number);
-        await this.sendCommand(args, 60);
+        this.sendSet({ D0310E: Number(value) });
       } catch (error) {
         this.handleError(error, `setTargetTemperature(${value}):`);
       }
@@ -316,10 +305,8 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
       this.platform.log.info(`setMode(${value})`, this.accessory.displayName);
       
       try {
-        const args = [...this.args];
-        args.push('set', `D0310C=${value}`,'-I');
         this.obj.setMode(value);
-        await this.sendCommand(args, 60);
+        this.sendSet({ D0310C: value as number });
       } catch (error) {
         this.handleError(error, `setMode(${value}):`);
       }
@@ -376,15 +363,8 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
     }
   }
 
-  async onCmdData(data: string) {
-    data = data.toString().replace(/\n$/, '');
-    this.platform.log.debug('onCmdData:', data, this.accessory.displayName);
-    if (data !== '') {
-      this.platform.log.error('OnCmdData()', data, this.accessory.displayName);
-    } else {
-      this.platform.log.success('OnCmdData()', this.accessory.displayName);
-    }
-  }
+  // onCmdData removed — the new daemon-based AirControlHandler reports
+  // set results through onSetResult(), which the parent class logs.
 
   async onPollData(data: string) {
     data = data.toString().replace(/\n$/, '');

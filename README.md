@@ -10,7 +10,7 @@
   <a href="https://github.com/homebridge/homebridge/wiki/Verified-Plugins"><img src="https://badgen.net/badge/homebridge/verified/purple" alt="verified-by-homebridge"></a>
 </p>
 
-<p align="center">A Homebridge plugin for Philips Air+ Smart Tower Heaters.</p>
+<p align="center">A Homebridge plugin for Philips Air+ Smart Tower Heaters <strong>and</strong> NEW2-protocol air purifiers / fans (e.g. CX3550).</p>
 
 ## Installation
 
@@ -26,11 +26,25 @@ The plugin uses a library based on `python3`. To use the plugin, Python/Pip must
 sudo apt install python3-pip git
 ```
 
-You also need the `phipsair` module from [M. Frister](https://github.com/mfrister/phipsair):
+You also need the `phipsair` module from [M. Frister](https://github.com/mfrister/phipsair),
+plus `requests` and `paho-mqtt` (<2.0) for the [cloud status source](#cloud-status-source-aws-iot-shadow):
 
 ```
-sudo pip3 install -U phipsair
+sudo pip3 install -U phipsair "requests" "paho-mqtt<2.0"
 ```
+
+On recent Debian/Raspberry Pi OS, the system Python is "externally managed" and `pip`
+refuses to install into it. The clean way is a dedicated virtual environment that still
+sees system packages, then point the plugin at it via the per-device `pythonBin` option:
+
+```
+sudo -u homebridge python3 -m venv --system-site-packages /var/lib/homebridge/philips-air-venv
+sudo -u homebridge /var/lib/homebridge/philips-air-venv/bin/pip install phipsair "requests" "paho-mqtt<2.0"
+# then set  "pythonBin": "/var/lib/homebridge/philips-air-venv/bin/python3"  for each device
+```
+
+> If you don't want the cloud source at all, set `"cloudStatus": false` per device and only
+> `phipsair` is required (status may then be unreliable on CX-series devices — see below).
 
 ### Docker Installation
 
@@ -58,6 +72,33 @@ phipsair -H <ip-address> status -J
 ```
 
 > **Note:** The plugin will check if `phipsair` is installed at startup. If not found, an error message will be displayed in the logs.
+
+## Cloud status source (AWS-IoT shadow)
+
+CX-series devices (e.g. **CX3550 "Trident"**) do **not** serve their local encrypted
+`/sys/dev/status` until they have been "activated" by a cloud client. On a freshly started
+device the local `info` endpoint answers, but every status read times out and a bare CoAP
+`observe` never receives a push. That is why, with local-only polling, HomeKit showed **no
+initial state** and **unreliable updates**.
+
+The official Philips Air+ app gets state because every device continuously mirrors its full
+state into an **AWS-IoT device shadow**. This plugin reproduces that path: on startup it
+obtains an anonymous **guest** token from Philips' cloud (no account needed), binds the
+device, fetches a pre-signed MQTT-over-WebSocket URL, and subscribes to the device's shadow.
+The shadow's `state.reported` carries the exact same `D0…` keys as a local observe frame, so:
+
+- **Initial state** is delivered immediately on startup (`shadow/get`).
+- **Changes** — whether made locally, on the device's buttons, or in the app — are mirrored
+  to the shadow within ~1 s and pushed to the plugin (`shadow/update`).
+- Reads are silent (no beep). **Control** (turning on/off, speed, …) still goes over local CoAP.
+
+This requires internet connectivity and the `requests` + `paho-mqtt` python packages.
+
+| | |
+|---|---|
+| **Config** | per-device `"cloudStatus": true` (default). Set to `false` to run local-only. |
+| **Guest identity** | a random id generated once and stored as `.philips-airplus-guest-id` in the Homebridge storage path, shared across all devices. |
+| **Privacy** | enabling this binds your device(s) to that anonymous guest identity on Philips' cloud. Bindings are **additive** and do **not** displace the official app. |
 
 ## Example Config
 
@@ -118,17 +159,36 @@ phipsair -H <ip-address> status -J
 | - deviceId         | Device unique identifier (auto-detected if empty)            | Auto-detected              | No       |
 | - **ip_address**   | Host/IP address of your device.                              |                            | Yes      |
 | - port             | Port of your device.                                         | `5683`                     | No       |
-| - model            | Device model: `auto`, `CX5120`, or `CX3120`                  | `auto`                     | No       |
-| - enableBacklight  | Enable backlight control (not supported on CX3120)           | `true`                     | No       |
-| - enableBeep       | Enable beep control switch                                   | `true`                     | No       |
+| - deviceType       | `auto`, `purifier`, or `heater`. Picks the HomeKit service.  | `auto`                     | No       |
+| - model            | Purifier model: `auto`, `Custom`, `CX3550`, `AC3220`, … (full list in UI dropdown) | `auto` | No |
+| - customProfile    | Purifier only. Overrides individual controls of the chosen `model`, or — with `model: Custom` — defines the full profile. Fully editable in the Homebridge UI. | _empty_ | No |
+| - printProfile     | If `true`, the resolved DeviceProfile JSON is printed to the log on startup. | `false`               | No       |
+| - enableBacklight  | Heater only. Backlight control (not supported on CX3120)     | `true`                     | No       |
+| - enableBeep       | Heater only. Beep control switch                             | `true`                     | No       |
+
+### Profiles
+
+Each NEW2 model is described by a `DeviceProfile` listing the exact D-Codes,
+preset writes, oscillation values, sensors and filters. The profiles live in
+`src/profiles/` — one file per model — and are ported from kongo09's
+`philips.py`. Verified profiles: `CX3550`. All other built-in profiles carry
+the `reference` mark (not hardware-verified by this plugin).
+
+If a built-in profile is mostly correct but one or two values misbehave on
+your unit, leave `model` on the matching built-in and use `customProfile`
+to override only the offending fields. With `model: Custom`, define the
+full profile.
+
+A handy way to see the values to start from: enable `printProfile` and the
+resolved profile is dumped as JSON into the Homebridge log.
 
 ## HomeKit Controls
 
-When you add the device to HomeKit, you will see the following controls:
+The plugin exposes two different accessory layouts depending on the resolved `deviceType`.
 
-### Thermostat
+### Heater (`deviceType: "heater"`, e.g. CX3120, CX5120)
 
-The main thermostat control with the following modes:
+Thermostat-based control:
 
 | HomeKit Mode | Device Mode |
 |--------------|-------------|
@@ -139,28 +199,41 @@ The main thermostat control with the following modes:
 
 > **Note:** Medium and Low modes are not directly accessible via HomeKit but are preserved if set via the Philips app.
 
-### Switches
+Plus switches: Oscillation, Beep, Auto+, Backlight (CX5120 only).
 
-HomeKit displays switches with generic names ("Switch", "Switch 2", etc.). Here is the mapping:
+### Air Purifier / Fan (`deviceType: "purifier"`, e.g. CX3550)
 
-| HomeKit Name   | Function    | Description                              |
-|----------------|-------------|------------------------------------------|
-| Switch 1       | Oscillation | Enables/disables the swing rotation      |
-| Switch 2       | Beep        | Enables/disables the button sounds       |
-| Switch 3       | Auto+       | Enables/disables the Auto+ AI mode       |
-| Backlight      | Backlight   | Controls the display backlight (CX5120 only) |
+`Fanv2`-based control:
 
-> **Tip:** You can rename these switches in the Home app by long-pressing the accessory and selecting "Accessory Settings".
+| HomeKit Characteristic | Device field   | Notes                                                                              |
+|------------------------|----------------|------------------------------------------------------------------------------------|
+| Active                 | `D03102`       | Power on/off                                                                       |
+| RotationSpeed          | `D0310C`       | Snaps to speed step 1/2/3. `D0310D` is read-only on the CX3550 and not written.    |
+| TargetFanState         | `D0310C`       | `Auto` → `D0310C=-126` ("natural breeze"); `Manual` → last explicit step / step 1. |
+| SwingMode              | `D0320F`       | CX3550 uses `17242`; on-value otherwise learned from observe / overridable.        |
+| LockPhysicalControls   | `D03103`       | Child lock.                                                                        |
+
+Sensors and filter info are added automatically once observed:
+
+- **AirQualitySensor** — `AirQuality` derived from PM2.5 thresholds + `PM2_5Density`
+- **TemperatureSensor** — `D03224 / 10` °C
+- **HumiditySensor** — `D03125` %
+- **FilterMaintenance** — minimum of pre-filter (`D0520D`/`D05207`) and NanoProtect (`D0540E`/`D05408`) remaining life
+
+Optional switches: Beep, Auto+ AI, Standby-Sensors.
+
+> **Tip:** You can rename services in the Home app by long-pressing the accessory and selecting "Accessory Settings".
 
 
 # Tested devices
 
 The following devices have been tested with this plugin and confirmed to work:
 
-| Model      | Features                                      |
-|------------|-----------------------------------------------|
-| CX5120/11  | Full support (thermostat, backlight, beep, oscillation, Auto+) |
-| CX3120/01  | Thermostat, beep, oscillation, Auto+ (no backlight) |
+| Model      | Type     | Features                                                                |
+|------------|----------|-------------------------------------------------------------------------|
+| CX5120/11  | Heater   | Full support (thermostat, backlight, beep, oscillation, Auto+)         |
+| CX3120/01  | Heater   | Thermostat, beep, oscillation, Auto+ (no backlight)                    |
+| CX3550/01  | Purifier | Fanv2, PM2.5/AirQuality, Temperature, Humidity, Filter, Beep, Auto+ AI |
 
 # Supported clients
 

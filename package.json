@@ -2,17 +2,17 @@
   "name": "homebridge-philipsairplus-platform",
   "displayName": "Philips Air+",
   "type": "module",
-  "version": "2.1.0",
-  "description": "Homebridge plugin for Philips Air+ Smart Fan Heater (CX3120, CX5120).",
-  "author": "André Vieira",
+  "version": "2.3.0",
+  "description": "Homebridge plugin for Philips Air+ Smart Fan Heater (CX3120, CX5120) and NEW2 air purifiers / fans (CX3550, AC3220, …).",
+  "author": "Dennis Fricke",
   "license": "MIT",
-  "homepage": "https://github.com/agmv/homebridge-philipsairplus-platform#readme",
+  "homepage": "https://github.com/frisch12/homebridge-philipsairplus#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/agmv/homebridge-philipsairplus-platform.git"
+    "url": "git+https://github.com/frisch12/homebridge-philipsairplus.git"
   },
   "bugs": {
-    "url": "https://github.com/agmv/homebridge-philipsairplus-platform/issues"
+    "url": "https://github.com/frisch12/homebridge-philipsairplus/issues"
   },
   "keywords": [
     "philips",
@@ -20,11 +20,16 @@
     "air",
     "homekit",
     "temperature",
-    "heater"
+    "heater",
+    "purifier",
+    "fan",
+    "cx3550",
+    "cx3120",
+    "cx5120"
   ],
   "main": "dist/index.js",
   "engines": {
-    "node": "^22.10.0 || ^24.0.0",
+    "node": "^18.17.0 || ^20.0.0 || ^22.0.0 || ^24.0.0",
     "homebridge": "^1.8.0 || ^2.0.0-beta.0"
   },
   "scripts": {

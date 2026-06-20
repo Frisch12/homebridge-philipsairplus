@@ -1,16 +1,38 @@
 import { type API, type Characteristic, type DynamicPlatformPlugin,
   type Logging, type PlatformAccessory, type PlatformConfig, type Service } from 'homebridge';
-import { exec } from 'node:child_process';
+import { exec, execFile } from 'node:child_process';
+import fs from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js';
 import { SmartFanHeaterAccessory } from './smartFanHeaterAccessory.js';
+import { AirPurifierAccessory } from './airPurifierAccessory.js';
+import { normaliseCustomProfile, profileToJSON, resolveProfile } from './profiles/registry.js';
+import { BUILTIN_PROFILES } from './profiles/builtin.js';
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 export enum DeviceType {
-  heater,
-  thermostat
+  heater = 'heater',
+  purifier = 'purifier',
+  auto = 'auto',
+}
+
+/** Model prefixes known to be heaters (Thermostat-style accessory). */
+const HEATER_MODEL_PREFIXES = ['CX3120', 'CX5120'];
+
+function detectDeviceTypeFromModel(model: string | undefined): DeviceType {
+  if (!model) {
+    return DeviceType.purifier;
+  }
+  const upper = model.toUpperCase();
+  return HEATER_MODEL_PREFIXES.some(p => upper.startsWith(p))
+    ? DeviceType.heater
+    : DeviceType.purifier;
 }
 
 /**
@@ -28,6 +50,10 @@ export class PhilipsAirPlusPlatform implements DynamicPlatformPlugin {
 
   // Flag to track if phipsair is available
   private phipsairAvailable: boolean = false;
+
+  // Stable anonymous guest id for the Philips cloud (AWS-IoT shadow source),
+  // generated once and persisted; shared across all devices of this install.
+  private guestId: string | undefined;
 
   constructor(
     public readonly log: Logging,
@@ -83,26 +109,69 @@ export class PhilipsAirPlusPlatform implements DynamicPlatformPlugin {
   }
 
   /**
-   * Fetch device info from IP address using phipsair
+   * Return a stable anonymous guest id for the Philips cloud, generating and
+   * persisting one on first use. Stored in Homebridge's storage path so the
+   * same anonymous enduser (and its device bindings) survives restarts.
+   * Shared across all devices so a single enduser owns all bindings.
    */
-  async fetchDeviceInfo(ipAddress: string, port: number = 5683): Promise<{ deviceId: string; model: string } | null> {
+  getGuestId(): string {
+    if (this.guestId) {
+      return this.guestId;
+    }
+    const file = path.join(this.api.user.storagePath(), '.philips-airplus-guest-id');
+    try {
+      const existing = fs.readFileSync(file, 'utf8').trim();
+      if (/^[0-9a-f]{32}$/.test(existing)) {
+        this.guestId = existing;
+        return existing;
+      }
+    } catch {
+      // file does not exist yet — fall through and create it
+    }
+    const id = randomBytes(16).toString('hex');
+    try {
+      fs.writeFileSync(file, id, { mode: 0o600 });
+      this.log.info(`Generated Philips cloud guest id (stored in ${file}).`);
+    } catch (e) {
+      this.log.warn(`Could not persist guest id (${(e as Error).message}); using a session-only id.`);
+    }
+    this.guestId = id;
+    return id;
+  }
+
+  /**
+   * Fetch device info via the daemon's `info` sub-command, which calls
+   * Philips' `/sys/dev/info` endpoint directly. Unlike status / observe,
+   * info is a plain GET that the device always answers — observe-style
+   * requests only push frames on state changes, which is useless for
+   * startup-time auto-detect.
+   */
+  async fetchDeviceInfo(
+    ipAddress: string,
+    port: number = 5683,
+  ): Promise<{ deviceId: string; model: string } | null> {
     try {
       this.log.info(`Fetching device info from ${ipAddress}:${port}...`);
-      const { stdout } = await execAsync(`phipsair -H ${ipAddress} -P ${port} status -J`, { timeout: 30000 });
-
-      const data = JSON.parse(stdout);
-
-      if (data.DeviceId) {
-        this.log.info(`Device detected: ${data.D01S05} (ID: ${data.DeviceId})`);
-        return {
-          deviceId: data.DeviceId,
-          model: data.D01S05 || 'Unknown',
-        };
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = path.dirname(__filename);
+      const helper = path.resolve(__dirname, '../lib/phipsair_info.py');
+      const { stdout } = await execFileAsync(
+        'python3',
+        [helper, '--host', ipAddress, '--port', String(port)],
+        { timeout: 15000 },
+      );
+      const data = JSON.parse(stdout) as Record<string, string>;
+      const deviceId = data.device_id;
+      const model = data.modelid || 'Unknown';
+      if (!deviceId) {
+        this.log.error(`phipsair info response missing device_id for ${ipAddress}: ${stdout}`);
+        return null;
       }
-
-      return null;
+      this.log.info(`Device detected: ${model} (ID: ${deviceId})`);
+      return { deviceId, model };
     } catch (error) {
-      this.log.error(`Failed to fetch device info from ${ipAddress}:`, (error as Error).message);
+      const msg = error instanceof Error ? error.message : String(error);
+      this.log.error(`Failed to fetch info from ${ipAddress}: ${msg}`);
       return null;
     }
   }
@@ -133,16 +202,19 @@ export class PhilipsAirPlusPlatform implements DynamicPlatformPlugin {
         continue;
       }
 
-      // Auto-detect deviceId if not provided
+      // Auto-detect deviceId / model if not provided
       let deviceId = device.deviceId;
-      if (!deviceId && device.ip_address) {
-        this.log.info(`No deviceId provided for ${device.name}, attempting auto-detection...`);
+      let detectedModel: string | undefined;
+      const needsAutoDetect = !deviceId || (device.deviceType ?? 'auto') === DeviceType.auto;
+      if (needsAutoDetect && device.ip_address) {
+        this.log.info(`Auto-detecting device info for ${device.name}...`);
         const info = await this.fetchDeviceInfo(device.ip_address, device.port || 5683);
         if (info) {
-          deviceId = info.deviceId;
-          device.deviceId = deviceId; // Store for future use
-          this.log.info(`Auto-detected deviceId: ${deviceId}`);
-        } else {
+          deviceId = deviceId ?? info.deviceId;
+          detectedModel = info.model;
+          device.deviceId = deviceId;
+          this.log.info(`Detected: deviceId=${deviceId}, model=${detectedModel}`);
+        } else if (!deviceId) {
           this.log.error(`Failed to auto-detect deviceId for ${device.name}. Please check the IP address or provide deviceId manually.`);
           continue;
         }
@@ -152,6 +224,20 @@ export class PhilipsAirPlusPlatform implements DynamicPlatformPlugin {
         this.log.error(`No deviceId for ${device.name} and no ip_address to auto-detect. Skipping.`);
         continue;
       }
+
+      // Cache the detected model on the device config so the profile resolver
+      // can use it without re-running auto-detect.
+      if (detectedModel) {
+        device.detectedModel = detectedModel;
+      }
+
+      // Resolve effective device type
+      const configuredType = (device.deviceType ?? DeviceType.auto) as DeviceType;
+      const effectiveType = configuredType === DeviceType.auto
+        ? detectDeviceTypeFromModel(detectedModel ?? device.model)
+        : configuredType;
+      device.effectiveDeviceType = effectiveType;
+      this.log.info(`Device "${device.name}" → type=${effectiveType}`);
 
       // generate a unique id for the accessory this should be generated from
       // something globally unique, but constant, for example, the device serial
@@ -173,8 +259,7 @@ export class PhilipsAirPlusPlatform implements DynamicPlatformPlugin {
         this.api.updatePlatformAccessories([existingAccessory]);
 
         // create the accessory handler for the restored accessory
-        // this is imported from `platformAccessory.ts`
-        new SmartFanHeaterAccessory(this, existingAccessory);
+        this.instantiateAccessory(effectiveType, existingAccessory);
 
         // it is possible to remove platform accessories at any time using `api.unregisterPlatformAccessories`, e.g.:
         // remove platform accessories when no longer present
@@ -191,9 +276,8 @@ export class PhilipsAirPlusPlatform implements DynamicPlatformPlugin {
         // the `context` property can be used to store any data about the accessory you may need
         accessory.context.device = device;
 
-        // create the accessory handler for the newly create accessory
-        // this is imported from `platformAccessory.ts`
-        new SmartFanHeaterAccessory(this, accessory);
+        // create the accessory handler for the newly created accessory
+        this.instantiateAccessory(effectiveType, accessory);
 
         // link the accessory to your platform
         this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
@@ -203,7 +287,45 @@ export class PhilipsAirPlusPlatform implements DynamicPlatformPlugin {
       this.discoveredCacheUUIDs.push(uuid);
     }
 
-    // you can also deal with accessories from the cache which are no longer present by removing them from Homebridge
+    this.cleanupStaleAccessories();
+  }
+
+  /** Pick the right accessory handler based on the resolved device type. */
+  private instantiateAccessory(type: DeviceType, accessory: PlatformAccessory) {
+    if (type === DeviceType.heater) {
+      new SmartFanHeaterAccessory(this, accessory);
+      return;
+    }
+    const device = accessory.context.device ?? {};
+    const { profile: customProfile, issues } = normaliseCustomProfile(device.customProfile);
+    for (const issue of issues) {
+      this.log.warn(`Custom profile for "${device.name}": ${issue}`);
+    }
+    const resolved = resolveProfile({
+      model: device.model ?? 'auto',
+      detectedModel: device.detectedModel ?? device.model,
+      customProfile,
+    });
+    if (!resolved) {
+      this.log.error(
+        `Cannot resolve a device profile for "${device.name}". Set "model" to one of: ` +
+        Object.keys(BUILTIN_PROFILES).join(', ') + ', or "Custom" with a full customProfile.',
+      );
+      return;
+    }
+    this.log.debug(
+      `Effective profile for "${device.name}" =\n${profileToJSON(resolved.profile)}`,
+    );
+    if (device.printProfile) {
+      this.log.info(
+        `Profile snapshot for "${device.name}":\n${profileToJSON(resolved.profile)}`,
+      );
+    }
+    new AirPurifierAccessory(this, accessory, resolved.profile);
+  }
+
+  private cleanupStaleAccessories() {
+    // deal with accessories from the cache which are no longer present by removing them from Homebridge
     // for example, if your plugin logs into a cloud account to retrieve a device list, and a user has previously removed a device
     // from this cloud account, then this device will no longer be present in the device list but will still be in the Homebridge cache
     for (const [uuid, accessory] of this.accessories) {

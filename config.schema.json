@@ -3,8 +3,8 @@
   "pluginType": "platform",
   "singular": true,
   "strictValidation": false,
-  "headerDisplay": "Homebridge Plugin for Philips Air+ Smart Heater",
-  "footerDisplay": "The plugin uses a library (phipsair) based on python3. So these requirements need to be installed first.",
+  "headerDisplay": "Homebridge plugin for Philips Air+ devices (Smart Heater & NEW2 air purifiers / fans).",
+  "footerDisplay": "Requires `phipsair` to be installed (`pip3 install phipsair`).",
   "schema": {
     "type": "object",
     "properties": {
@@ -30,24 +30,47 @@
               "title": "Debug",
               "type": "boolean",
               "description": "Enables additional output (debug) in the log."
-            },                  
+            },
+            "printProfile": {
+              "title": "Print effective profile",
+              "type": "boolean",
+              "default": false,
+              "description": "On startup, log the full resolved DeviceProfile JSON — useful for tweaking the custom profile."
+            },
+            "keepaliveSec": {
+              "title": "Sync keepalive interval (seconds)",
+              "type": "integer",
+              "default": 5,
+              "minimum": 1,
+              "maximum": 60,
+              "description": "How often the long-lived daemon re-issues `sys/dev/sync` to keep the device's observe subscription alive. The official Philips app sends these every few seconds. Default 5 s is conservative; raise if you see no reliability issues."
+            },
+            "pythonBin": {
+              "title": "Python interpreter",
+              "type": "string",
+              "default": "python3",
+              "placeholder": "python3",
+              "description": "Path or name of the python3 used to run the daemon. Only change if `python3` isn't on Homebridge's PATH (e.g. virtualenv setups)."
+            },
+            "cloudStatus": {
+              "title": "Cloud status source (AWS-IoT shadow)",
+              "type": "boolean",
+              "default": true,
+              "description": "CX-series devices (e.g. CX3550) refuse to serve their local status until cloud-activated — exactly like the official app. When enabled, the plugin reads state from the device's AWS-IoT shadow over an anonymous (guest) connection: reliable initial state and change pushes, no Philips account needed. Requires internet and the python `requests` + `paho-mqtt` packages. Disable to run local-only (status may be unreliable on CX devices)."
+            },
             "name": {
               "title": "Name",
               "type": "string",
               "required": true,
               "description": "Device display name",
-              "condition": {
-                "functionBody": "try { return model.devices[arrayIndices[0]].active } catch(e){ return false }"
-              }
+              "condition": { "functionBody": "try { return model.devices[arrayIndices[0]].active } catch(e){ return false }" }
             },
             "deviceId": {
               "title": "Device Id",
               "type": "string",
               "description": "Device unique id. Leave empty for auto-detection from IP address.",
-              "condition": {
-                "functionBody": "try { return model.devices[arrayIndices[0]].active } catch(e){ return false }"
-              }
-            },            
+              "condition": { "functionBody": "try { return model.devices[arrayIndices[0]].active } catch(e){ return false }" }
+            },
             "ip_address": {
               "title": "IP Address",
               "type": "string",
@@ -55,50 +78,222 @@
               "format": "ipv4",
               "placeholder": "10.0.1.16",
               "description": "IP address of your device.",
-              "condition": {
-                "functionBody": "try { return model.devices[arrayIndices[0]].active } catch(e){ return false }"
-              }
+              "condition": { "functionBody": "try { return model.devices[arrayIndices[0]].active } catch(e){ return false }" }
             },
             "port": {
               "title": "Port",
               "type": "integer",
               "placeholder": 5683,
               "description": "Port of your device.",
-              "condition": {
-                "functionBody": "try { return model.devices[arrayIndices[0]].active } catch(e){ return false }"
-              }
+              "condition": { "functionBody": "try { return model.devices[arrayIndices[0]].active } catch(e){ return false }" }
             },
-            "model": {
-              "title": "Device Model",
+            "deviceType": {
+              "title": "Device Type",
               "type": "string",
               "oneOf": [
                 { "title": "Auto-detect", "enum": ["auto"] },
-                { "title": "CX5120", "enum": ["CX5120"] },
-                { "title": "CX3120", "enum": ["CX3120"] }
+                { "title": "Air Purifier / Fan (Fanv2)", "enum": ["purifier"] },
+                { "title": "Smart Heater (Thermostat)", "enum": ["heater"] }
               ],
               "default": "auto",
-              "description": "Device model. Auto-detect will determine the model from the device response.",
-              "condition": {
-                "functionBody": "try { return model.devices[arrayIndices[0]].active } catch(e){ return false }"
-              }
+              "description": "How the device is exposed to HomeKit.",
+              "condition": { "functionBody": "try { return model.devices[arrayIndices[0]].active } catch(e){ return false }" }
+            },
+            "model": {
+              "title": "Device Model (purifier)",
+              "type": "string",
+              "oneOf": [
+                { "title": "Auto-detect", "enum": ["auto"] },
+                { "title": "Custom (define profile below)", "enum": ["Custom"] },
+                { "title": "CX3550 (verified)", "enum": ["CX3550"] },
+                { "title": "AC0850/11C", "enum": ["AC0850-11C"] },
+                { "title": "AC0850/20C", "enum": ["AC0850-20C"] },
+                { "title": "AC0850/31C", "enum": ["AC0850-31C"] },
+                { "title": "AC0850/41C", "enum": ["AC0850-41C"] },
+                { "title": "AC0850/70C", "enum": ["AC0850-70C"] },
+                { "title": "AC0850/81",  "enum": ["AC0850-81"] },
+                { "title": "AC0950", "enum": ["AC0950"] },
+                { "title": "AC0951", "enum": ["AC0951"] },
+                { "title": "AC2210", "enum": ["AC2210"] },
+                { "title": "AC2220", "enum": ["AC2220"] },
+                { "title": "AC2221", "enum": ["AC2221"] },
+                { "title": "AC3210", "enum": ["AC3210"] },
+                { "title": "AC3220", "enum": ["AC3220"] },
+                { "title": "AC3221", "enum": ["AC3221"] },
+                { "title": "AC3420", "enum": ["AC3420"] },
+                { "title": "AC3421", "enum": ["AC3421"] },
+                { "title": "AC3737", "enum": ["AC3737"] },
+                { "title": "AC4220", "enum": ["AC4220"] },
+                { "title": "AC4221", "enum": ["AC4221"] },
+                { "title": "AMF765", "enum": ["AMF765"] },
+                { "title": "AMF870", "enum": ["AMF870"] },
+                { "title": "HU1509", "enum": ["HU1509"] },
+                { "title": "HU1510", "enum": ["HU1510"] },
+                { "title": "HU5710", "enum": ["HU5710"] }
+              ],
+              "default": "auto",
+              "description": "Built-in profile to use. Pick \"Custom\" to define the full profile below. Reference profiles are ported from kongo09 and are not all hardware-verified.",
+              "condition": { "functionBody": "try { return model.devices[arrayIndices[0]].active && (model.devices[arrayIndices[0]].deviceType || 'auto') !== 'heater' } catch(e){ return false }" }
             },
             "enableBacklight": {
-              "title": "Enable Backlight Control",
+              "title": "Enable Backlight Control (heater only)",
               "type": "boolean",
               "default": true,
-              "description": "Enable the backlight control service. Automatically disabled for CX3120.",
-              "condition": {
-                "functionBody": "try { return model.devices[arrayIndices[0]].active && model.devices[arrayIndices[0]].model !== 'CX3120' } catch(e){ return false }"
-              }
+              "description": "Heater models only. Automatically disabled for CX3120.",
+              "condition": { "functionBody": "try { return model.devices[arrayIndices[0]].active && (model.devices[arrayIndices[0]].deviceType || 'auto') === 'heater' && model.devices[arrayIndices[0]].model !== 'CX3120' } catch(e){ return false }" }
             },
             "enableBeep": {
-              "title": "Enable Beep Control",
+              "title": "Enable Beep Switch (heater only)",
               "type": "boolean",
               "default": true,
-              "description": "Enable the beep control service.",
-              "condition": {
-                "functionBody": "try { return model.devices[arrayIndices[0]].active } catch(e){ return false }"
-              }
+              "description": "Heater models only. Purifier beep switch comes from the chosen profile.",
+              "condition": { "functionBody": "try { return model.devices[arrayIndices[0]].active && (model.devices[arrayIndices[0]].deviceType || 'auto') === 'heater' } catch(e){ return false }" }
+            },
+            "customProfile": {
+              "title": "Custom profile (overrides selected model field-by-field)",
+              "type": "object",
+              "description": "Override any single field of the chosen model — leave the rest unchanged. With model = \"Custom\", define the full profile here.",
+              "properties": {
+                "power": {
+                  "title": "Power control",
+                  "type": "object",
+                  "properties": {
+                    "key": { "title": "D-Code", "type": "string", "placeholder": "D03102" },
+                    "onValue": { "title": "On value", "type": "integer", "placeholder": 1 },
+                    "offValue": { "title": "Off value", "type": "integer", "placeholder": 0 }
+                  }
+                },
+                "presets": {
+                  "title": "Fan / mode presets",
+                  "type": "array",
+                  "description": "Each preset writes a set of D-Codes atomically. Role determines how the preset is exposed in HomeKit.",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": { "title": "Id (snake_case)", "type": "string", "placeholder": "speed_1" },
+                      "label": { "title": "Label", "type": "string", "placeholder": "Speed 1" },
+                      "role": {
+                        "title": "Role",
+                        "type": "string",
+                        "oneOf": [
+                          { "title": "Speed step", "enum": ["speed"] },
+                          { "title": "Auto / Natural", "enum": ["auto"] },
+                          { "title": "Sleep / Quiet", "enum": ["sleep"] },
+                          { "title": "Special (no implicit binding)", "enum": ["special"] }
+                        ],
+                        "default": "speed"
+                      },
+                      "writes": {
+                        "title": "Writes",
+                        "type": "array",
+                        "description": "All D-Codes to write when this preset is activated.",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "key": { "title": "D-Code", "type": "string", "placeholder": "D0310C" },
+                            "value": { "title": "Integer value", "type": "integer", "placeholder": 1 }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "oscillation": {
+                  "title": "Oscillation control",
+                  "type": "object",
+                  "properties": {
+                    "key": { "title": "D-Code", "type": "string", "placeholder": "D0320F" },
+                    "onValue": { "title": "On value", "type": "integer", "placeholder": 17242 },
+                    "offValue": { "title": "Off value", "type": "integer", "placeholder": 0 }
+                  }
+                },
+                "childLock": {
+                  "title": "Child lock control",
+                  "type": "object",
+                  "properties": {
+                    "key": { "title": "D-Code", "type": "string", "placeholder": "D03103" },
+                    "onValue": { "title": "On value", "type": "integer", "placeholder": 1 },
+                    "offValue": { "title": "Off value", "type": "integer", "placeholder": 0 }
+                  }
+                },
+                "beep": {
+                  "title": "Beep control",
+                  "type": "object",
+                  "properties": {
+                    "key": { "title": "D-Code", "type": "string", "placeholder": "D03130" },
+                    "onValue": { "title": "On value", "type": "integer", "placeholder": 100 },
+                    "offValue": { "title": "Off value", "type": "integer", "placeholder": 0 }
+                  }
+                },
+                "autoPlus": {
+                  "title": "Auto+ AI control",
+                  "type": "object",
+                  "properties": {
+                    "key": { "title": "D-Code", "type": "string", "placeholder": "D03180" },
+                    "onValue": { "title": "On value", "type": "integer", "placeholder": 1 },
+                    "offValue": { "title": "Off value", "type": "integer", "placeholder": 0 }
+                  }
+                },
+                "standbySensors": {
+                  "title": "Standby-Sensors control",
+                  "type": "object",
+                  "properties": {
+                    "key": { "title": "D-Code", "type": "string", "placeholder": "D03134" },
+                    "onValue": { "title": "On value", "type": "integer", "placeholder": 1 },
+                    "offValue": { "title": "Off value", "type": "integer", "placeholder": 0 }
+                  }
+                },
+                "backlight": {
+                  "title": "Backlight control",
+                  "type": "object",
+                  "properties": {
+                    "key": { "title": "D-Code", "type": "string", "placeholder": "D03105" },
+                    "onValue": { "title": "On value", "type": "integer", "placeholder": 100 },
+                    "offValue": { "title": "Off value", "type": "integer", "placeholder": 0 }
+                  }
+                },
+                "sensors": {
+                  "title": "Sensors",
+                  "type": "object",
+                  "properties": {
+                    "pm25":     { "title": "PM2.5 D-Code", "type": "string", "placeholder": "D03221" },
+                    "iai":      { "title": "Indoor Allergen Index D-Code", "type": "string", "placeholder": "D03120" },
+                    "gas":      { "title": "Gas D-Code", "type": "string", "placeholder": "D03122" },
+                    "humidity": { "title": "Humidity D-Code", "type": "string", "placeholder": "D03125" },
+                    "temperature": {
+                      "title": "Temperature sensor",
+                      "type": "object",
+                      "properties": {
+                        "key": { "title": "D-Code", "type": "string", "placeholder": "D03224" },
+                        "divisor": { "title": "Divisor (raw value / divisor = °C)", "type": "integer", "placeholder": 10 }
+                      }
+                    }
+                  }
+                },
+                "filters": {
+                  "title": "Filter info",
+                  "type": "object",
+                  "properties": {
+                    "prefilter": {
+                      "title": "Pre-filter",
+                      "type": "object",
+                      "properties": {
+                        "remainingKey": { "title": "Remaining D-Code", "type": "string", "placeholder": "D0520D" },
+                        "totalKey":     { "title": "Total D-Code", "type": "string", "placeholder": "D05207" }
+                      }
+                    },
+                    "nanoprotect": {
+                      "title": "NanoProtect filter",
+                      "type": "object",
+                      "properties": {
+                        "remainingKey": { "title": "Remaining D-Code", "type": "string", "placeholder": "D0540E" },
+                        "totalKey":     { "title": "Total D-Code", "type": "string", "placeholder": "D05408" }
+                      }
+                    }
+                  }
+                }
+              },
+              "condition": { "functionBody": "try { return model.devices[arrayIndices[0]].active && (model.devices[arrayIndices[0]].deviceType || 'auto') !== 'heater' } catch(e){ return false }" }
             }
           }
         }
@@ -109,9 +304,7 @@
     {
       "title": "Configuration",
       "type": "fieldset",
-      "items": [
-        "name"
-      ]      
+      "items": ["name"]
     },
     {
       "key": "devices",
@@ -127,13 +320,201 @@
           "items": [
             "devices[].active",
             "devices[].debug",
+            "devices[].printProfile",
+            "devices[].keepaliveSec",
+            "devices[].pythonBin",
             "devices[].deviceId",
             "devices[].name",
             "devices[].ip_address",
             "devices[].port",
+            "devices[].deviceType",
             "devices[].model",
             "devices[].enableBacklight",
-            "devices[].enableBeep"
+            "devices[].enableBeep",
+            {
+              "key": "devices[].customProfile",
+              "type": "fieldset",
+              "title": "Custom profile (advanced)",
+              "expandable": true,
+              "expanded": false,
+              "items": [
+                {
+                  "key": "devices[].customProfile.power",
+                  "type": "fieldset",
+                  "title": "Power",
+                  "expandable": true,
+                  "expanded": false,
+                  "items": [
+                    "devices[].customProfile.power.key",
+                    "devices[].customProfile.power.onValue",
+                    "devices[].customProfile.power.offValue"
+                  ]
+                },
+                {
+                  "key": "devices[].customProfile.presets",
+                  "type": "array",
+                  "title": "Fan / mode presets",
+                  "expandable": true,
+                  "expanded": false,
+                  "orderable": true,
+                  "add": "Add preset",
+                  "items": [
+                    {
+                      "type": "fieldset",
+                      "items": [
+                        "devices[].customProfile.presets[].id",
+                        "devices[].customProfile.presets[].label",
+                        "devices[].customProfile.presets[].role",
+                        {
+                          "key": "devices[].customProfile.presets[].writes",
+                          "type": "array",
+                          "title": "Writes",
+                          "expandable": true,
+                          "expanded": false,
+                          "add": "Add write",
+                          "items": [
+                            {
+                              "type": "fieldset",
+                              "items": [
+                                "devices[].customProfile.presets[].writes[].key",
+                                "devices[].customProfile.presets[].writes[].value"
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "key": "devices[].customProfile.oscillation",
+                  "type": "fieldset",
+                  "title": "Oscillation",
+                  "expandable": true,
+                  "expanded": false,
+                  "items": [
+                    "devices[].customProfile.oscillation.key",
+                    "devices[].customProfile.oscillation.onValue",
+                    "devices[].customProfile.oscillation.offValue"
+                  ]
+                },
+                {
+                  "key": "devices[].customProfile.childLock",
+                  "type": "fieldset",
+                  "title": "Child lock",
+                  "expandable": true,
+                  "expanded": false,
+                  "items": [
+                    "devices[].customProfile.childLock.key",
+                    "devices[].customProfile.childLock.onValue",
+                    "devices[].customProfile.childLock.offValue"
+                  ]
+                },
+                {
+                  "key": "devices[].customProfile.beep",
+                  "type": "fieldset",
+                  "title": "Beep",
+                  "expandable": true,
+                  "expanded": false,
+                  "items": [
+                    "devices[].customProfile.beep.key",
+                    "devices[].customProfile.beep.onValue",
+                    "devices[].customProfile.beep.offValue"
+                  ]
+                },
+                {
+                  "key": "devices[].customProfile.autoPlus",
+                  "type": "fieldset",
+                  "title": "Auto+ AI",
+                  "expandable": true,
+                  "expanded": false,
+                  "items": [
+                    "devices[].customProfile.autoPlus.key",
+                    "devices[].customProfile.autoPlus.onValue",
+                    "devices[].customProfile.autoPlus.offValue"
+                  ]
+                },
+                {
+                  "key": "devices[].customProfile.standbySensors",
+                  "type": "fieldset",
+                  "title": "Standby sensors",
+                  "expandable": true,
+                  "expanded": false,
+                  "items": [
+                    "devices[].customProfile.standbySensors.key",
+                    "devices[].customProfile.standbySensors.onValue",
+                    "devices[].customProfile.standbySensors.offValue"
+                  ]
+                },
+                {
+                  "key": "devices[].customProfile.backlight",
+                  "type": "fieldset",
+                  "title": "Backlight",
+                  "expandable": true,
+                  "expanded": false,
+                  "items": [
+                    "devices[].customProfile.backlight.key",
+                    "devices[].customProfile.backlight.onValue",
+                    "devices[].customProfile.backlight.offValue"
+                  ]
+                },
+                {
+                  "key": "devices[].customProfile.sensors",
+                  "type": "fieldset",
+                  "title": "Sensors",
+                  "expandable": true,
+                  "expanded": false,
+                  "items": [
+                    "devices[].customProfile.sensors.pm25",
+                    "devices[].customProfile.sensors.iai",
+                    "devices[].customProfile.sensors.gas",
+                    "devices[].customProfile.sensors.humidity",
+                    {
+                      "key": "devices[].customProfile.sensors.temperature",
+                      "type": "fieldset",
+                      "title": "Temperature",
+                      "expandable": true,
+                      "expanded": false,
+                      "items": [
+                        "devices[].customProfile.sensors.temperature.key",
+                        "devices[].customProfile.sensors.temperature.divisor"
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "key": "devices[].customProfile.filters",
+                  "type": "fieldset",
+                  "title": "Filters",
+                  "expandable": true,
+                  "expanded": false,
+                  "items": [
+                    {
+                      "key": "devices[].customProfile.filters.prefilter",
+                      "type": "fieldset",
+                      "title": "Pre-filter",
+                      "expandable": true,
+                      "expanded": false,
+                      "items": [
+                        "devices[].customProfile.filters.prefilter.remainingKey",
+                        "devices[].customProfile.filters.prefilter.totalKey"
+                      ]
+                    },
+                    {
+                      "key": "devices[].customProfile.filters.nanoprotect",
+                      "type": "fieldset",
+                      "title": "NanoProtect filter",
+                      "expandable": true,
+                      "expanded": false,
+                      "items": [
+                        "devices[].customProfile.filters.nanoprotect.remainingKey",
+                        "devices[].customProfile.filters.nanoprotect.totalKey"
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
           ]
         }
       ]
