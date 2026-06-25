@@ -161,11 +161,16 @@ export function applyObserveFrame(state: DeviceState, profile: DeviceProfile, js
   // Active preset — pick the preset whose `writes` match the current state.
   state.activePresetId = detectActivePreset(state, profile);
 
-  // Oscillation
+  // Oscillation. The CX3550 (and likely other NEW2 models) reports a
+  // DIFFERENT value than the one used to set it: writing onValue 17242 turns
+  // it on, but D0320F then reads back as 23040 (an angle/state code), while
+  // off reads as offValue 0. A strict `=== onValue` comparison therefore
+  // always evaluated to off. Treat anything that is not the off value as
+  // oscillating — robust regardless of the exact on-code the device returns.
   if (profile.oscillation) {
     const v = state.rawValues[profile.oscillation.key];
     if (v !== undefined) {
-      state.oscillation = v === profile.oscillation.onValue;
+      state.oscillation = v !== profile.oscillation.offValue;
     }
   }
   state.childLock = readBinary(state, profile.childLock) ?? state.childLock;

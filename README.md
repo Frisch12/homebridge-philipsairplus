@@ -81,16 +81,23 @@ device the local `info` endpoint answers, but every status read times out and a 
 `observe` never receives a push. That is why, with local-only polling, HomeKit showed **no
 initial state** and **unreliable updates**.
 
-The official Philips Air+ app gets state because every device continuously mirrors its full
-state into an **AWS-IoT device shadow**. This plugin reproduces that path: on startup it
-obtains an anonymous **guest** token from Philips' cloud (no account needed), binds the
-device, fetches a pre-signed MQTT-over-WebSocket URL, and subscribes to the device's shadow.
-The shadow's `state.reported` carries the exact same `D0…` keys as a local observe frame, so:
+Every device also mirrors its full state into an **AWS-IoT device shadow**. This plugin uses
+that path purely to **wake the device and grab the initial state**: on startup (and again after
+every local reconnect) it obtains an anonymous **guest** token from Philips' cloud (no account
+needed), binds the device, fetches a pre-signed MQTT-over-WebSocket URL, reads the shadow once
+(`shadow/get`), and then **closes the connection again**. The shadow's `state.reported` carries
+the exact same `D0…` keys as a local observe frame, so:
 
-- **Initial state** is delivered immediately on startup (`shadow/get`).
-- **Changes** — whether made locally, on the device's buttons, or in the app — are mirrored
-  to the shadow within ~1 s and pushed to the plugin (`shadow/update`).
-- Reads are silent (no beep). **Control** (turning on/off, speed, …) still goes over local CoAP.
+- **Initial state** is delivered on startup from the one-shot shadow read.
+- **Changes** afterwards come from the local CoAP `observe`, which works reliably once the
+  device has been warmed by that first cloud read.
+- Reads are silent (no beep). **Control** (turning on/off, speed, …) goes over local CoAP.
+
+> **Why one-shot and not a persistent subscription?** The device exposes a *single* active
+> control session. While a cloud client holds that session open, the device keeps reporting
+> state but **silently ignores every local CoAP `set`** — i.e. the fan stops reacting to
+> commands. The bootstrap therefore releases the cloud connection immediately so local control
+> keeps working.
 
 This requires internet connectivity and the `requests` + `paho-mqtt` python packages.
 
@@ -165,6 +172,10 @@ This requires internet connectivity and the `requests` + `paho-mqtt` python pack
 | - printProfile     | If `true`, the resolved DeviceProfile JSON is printed to the log on startup. | `false`               | No       |
 | - enableBacklight  | Heater only. Backlight control (not supported on CX3120)     | `true`                     | No       |
 | - enableBeep       | Heater only. Beep control switch                             | `true`                     | No       |
+| - emitOscillationSwitch | Purifier only. Expose the dedicated Oscillation switch to HomeKit. `false` keeps it out (fan's native SwingMode stays). | `true` | No |
+| - emitSleepSwitch  | Purifier only. Expose the Sleep switch to HomeKit (if the profile has a sleep preset). | `true`           | No       |
+| - emitBeepSwitch   | Purifier only. Expose the Beep switch to HomeKit (if the profile has a beep control). | `true`            | No       |
+| - emitLedSwitch    | Purifier only. Expose the LED / Backlight to HomeKit (if the profile has a backlight control). Turn off if Siri confuses it with the fan. | `true` | No |
 
 ### Profiles
 

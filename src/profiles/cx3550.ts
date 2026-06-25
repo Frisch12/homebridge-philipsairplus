@@ -16,7 +16,9 @@ import type { DeviceProfile } from './types.js';
  *    mode that cycles between speed 1 and 2 at intervals.
  *  - D0310D is read-only on the CX3550 and silently ignores writes, but
  *    writing it along with D0310C does no harm.
- *  - D0320F oscillation on-value is 17242 (off = 0).
+ *  - D0320F oscillation: write 17242 to turn on (off = 0), but the device
+ *    READS BACK a different code (observed: 23040) when oscillating — so
+ *    status is derived as "!= offValue", not "== onValue".
  *  - D03105 controls display backlight (100 = on, 0 = off).
  *  - D0313B carries the room temperature in °C directly (no divisor). This
  *    is the CX3550's equivalent of the D03224 key seen on other NEW2
