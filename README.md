@@ -274,6 +274,12 @@ You can contribute to this homebridge plugin in following ways:
 # Troubleshooting
 If you have any issues with the plugin then you can run this plugin in debug mode, which will provide some additional information. This might be useful for debugging issues. Just open your config ui and set debug to true!
 
+**Status updates but commands don't react (CX-series).** The device has a single active control session; a persistent cloud connection holding it makes the device ignore local commands. This plugin only reads the cloud shadow once at startup and then closes the connection, so local control keeps working — make sure you are on a version that does this (≥ 2.3.1). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#cloud-bootstrap-one-shot).
+
+**A switch toggles but its state always shows off.** Some devices read a control's value back as a different code than the one used to set it (e.g. CX3550 oscillation). This is handled for built-in profiles; for a `customProfile`, the displayed state is derived as "not the off value". See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#profiles).
+
+For the full design — daemon protocol, control/status flow, and device quirks — see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
 # Disclaimer
 
 All product and company names are trademarks™ or registered® trademarks of their respective holders. Use of them does not imply any affiliation with or endorsement by them.
