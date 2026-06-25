@@ -73,6 +73,17 @@ export class AirPurifierAccessory extends AirControlHandler {
     const C = this.platform.Characteristic;
     const S = this.platform.Service;
 
+    // Per-switch "expose to HomeKit" toggles (default on). When off, the
+    // corresponding service is not created at all — useful when Siri can't
+    // tell a device's dedicated switch (e.g. LED/Backlight) apart from the
+    // fan itself. A switch is only ever created when BOTH the profile
+    // declares the control AND the user left it enabled.
+    const device = this.accessory.context.device ?? {};
+    const emitOscillationSwitch = device.emitOscillationSwitch !== false;
+    const emitSleepSwitch = device.emitSleepSwitch !== false;
+    const emitBeepSwitch = device.emitBeepSwitch !== false;
+    const emitLedSwitch = device.emitLedSwitch !== false;
+
     // Accessory information
     this.accessory.getService(S.AccessoryInformation)!
       .setCharacteristic(C.Manufacturer, this.manufacturer)
@@ -110,7 +121,7 @@ export class AirPurifierAccessory extends AirControlHandler {
     // HomeKit apps only show "primitive" Fanv2 characteristics (Active +
     // RotationSpeed). The Switch is linked to the Fanv2 service so Apple
     // Home groups them under the same accessory.
-    if (this.profile.oscillation) {
+    if (this.profile.oscillation && emitOscillationSwitch) {
       this.oscillationService = this.accessory.getServiceById(S.Switch, 'OSCILLATION')
         ?? this.accessory.addService(S.Switch, 'Oscillation', 'OSCILLATION');
       this.oscillationService.getCharacteristic(C.On).onSet(this.setSwingMode.bind(this));
@@ -121,7 +132,7 @@ export class AirPurifierAccessory extends AirControlHandler {
 
     // Sleep doesn't map to a native Fanv2 characteristic, so it gets its own
     // Switch. Same linking logic.
-    if (sleepPreset(this.profile)) {
+    if (sleepPreset(this.profile) && emitSleepSwitch) {
       this.sleepService = this.accessory.getServiceById(S.Switch, 'SLEEP')
         ?? this.accessory.addService(S.Switch, 'Sleep', 'SLEEP');
       this.sleepService.getCharacteristic(C.On).onSet(this.setSleep.bind(this));
@@ -135,7 +146,7 @@ export class AirPurifierAccessory extends AirControlHandler {
     // Optional sub-services (only if declared by the profile). Each is linked
     // to the primary Fanv2 so iOS Home groups them under the same tile rather
     // than scattering them across the Home screen.
-    if (this.profile.beep) {
+    if (this.profile.beep && emitBeepSwitch) {
       this.beepService = this.accessory.getServiceById(S.Switch, 'BEEP')
         ?? this.accessory.addService(S.Switch, 'Beep', 'BEEP');
       this.beepService.getCharacteristic(C.On).onSet(this.setBeep.bind(this));
@@ -159,7 +170,7 @@ export class AirPurifierAccessory extends AirControlHandler {
     } else {
       this.removeSwitchById('STANDBY_SENSORS');
     }
-    if (this.profile.backlight) {
+    if (this.profile.backlight && emitLedSwitch) {
       this.backlightService = this.accessory.getServiceById(S.Lightbulb, 'BACKLIGHT')
         ?? this.accessory.addService(S.Lightbulb, 'Backlight', 'BACKLIGHT');
       this.backlightService.getCharacteristic(C.On).onSet(this.setBacklight.bind(this));

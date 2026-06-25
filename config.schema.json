@@ -149,6 +149,34 @@
               "description": "Heater models only. Purifier beep switch comes from the chosen profile.",
               "condition": { "functionBody": "try { return model.devices[arrayIndices[0]].active && (model.devices[arrayIndices[0]].deviceType || 'auto') === 'heater' } catch(e){ return false }" }
             },
+            "emitOscillationSwitch": {
+              "title": "Expose Oscillation switch",
+              "type": "boolean",
+              "default": true,
+              "description": "Purifier/fan only. When off, the dedicated Oscillation switch is NOT created in Homebridge/HomeKit (the fan's native SwingMode stays available on the fan tile). Turn off if Siri confuses it with a light or other switch.",
+              "condition": { "functionBody": "try { return model.devices[arrayIndices[0]].active && (model.devices[arrayIndices[0]].deviceType || 'auto') !== 'heater' } catch(e){ return false }" }
+            },
+            "emitSleepSwitch": {
+              "title": "Expose Sleep switch",
+              "type": "boolean",
+              "default": true,
+              "description": "Purifier/fan only. When off, the Sleep switch is NOT created in Homebridge/HomeKit. Only shown if the chosen profile has a sleep preset.",
+              "condition": { "functionBody": "try { return model.devices[arrayIndices[0]].active && (model.devices[arrayIndices[0]].deviceType || 'auto') !== 'heater' } catch(e){ return false }" }
+            },
+            "emitBeepSwitch": {
+              "title": "Expose Beep switch",
+              "type": "boolean",
+              "default": true,
+              "description": "Purifier/fan only. When off, the Beep switch is NOT created in Homebridge/HomeKit. Only shown if the chosen profile has a beep control.",
+              "condition": { "functionBody": "try { return model.devices[arrayIndices[0]].active && (model.devices[arrayIndices[0]].deviceType || 'auto') !== 'heater' } catch(e){ return false }" }
+            },
+            "emitLedSwitch": {
+              "title": "Expose LED / Backlight",
+              "type": "boolean",
+              "default": true,
+              "description": "Purifier/fan only. When off, the LED / Backlight (Lightbulb) is NOT created in Homebridge/HomeKit. Turn off if Siri confuses the device's light with the fan. Only shown if the chosen profile has a backlight control.",
+              "condition": { "functionBody": "try { return model.devices[arrayIndices[0]].active && (model.devices[arrayIndices[0]].deviceType || 'auto') !== 'heater' } catch(e){ return false }" }
+            },
             "customProfile": {
               "title": "Custom profile (overrides selected model field-by-field)",
               "type": "object",
@@ -308,12 +336,10 @@
     },
     {
       "key": "devices",
-      "title": "Devices",
-      "expandable": true,
-      "expanded": true,
-      "orderable": false,
+      "type": "tabarray",
       "add": "Add Device",
-      "type": "array",
+      "remove": "Remove Device",
+      "title": "{{ value.name || 'New Device' }}",
       "items": [
         {
           "type": "fieldset",
@@ -331,6 +357,10 @@
             "devices[].model",
             "devices[].enableBacklight",
             "devices[].enableBeep",
+            "devices[].emitOscillationSwitch",
+            "devices[].emitSleepSwitch",
+            "devices[].emitBeepSwitch",
+            "devices[].emitLedSwitch",
             {
               "key": "devices[].customProfile",
               "type": "fieldset",
