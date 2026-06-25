@@ -36,7 +36,6 @@ import hashlib
 import hmac
 import json
 import threading
-import time
 import urllib.parse
 from typing import Callable, Optional
 
@@ -53,11 +52,6 @@ APP_ID = "9fd505fa9c7111e9a1e3061302926720"
 SECRET = "a_zagf9sb2dpbiImtycwibgfzd6nksd65m"
 USER_AGENT = "MxChip&Fog&Hyj#com.philips.ph.homecare#_v3.18.1"
 PUSH_TYPE = "android-fcm-v1"
-
-# presigned URLs are valid for X-Amz-Expires=3600s; refresh comfortably before.
-URL_TTL_SEC = 3600
-URL_REFRESH_SEC = 3000
-
 
 def _hmac_hex(message: str, key: str) -> str:
     return hmac.new(key.encode(), message.encode(), hashlib.sha256).hexdigest()
@@ -168,156 +162,83 @@ def _extract_reported(payload: bytes) -> Optional[dict]:
     return None
 
 
-class ShadowListener:
+def fetch_shadow_once(
+    guest_id: str,
+    device_id: str,
+    log: Callable[[str, str], None] = lambda lvl, m: None,
+    timeout: float = 20.0,
+) -> Optional[dict]:
     """
-    Maintains a cloud MQTT connection for ONE device and invokes
-    `on_state(reported_dict_full)` on every shadow update, always with the
-    full merged reported state (never a partial delta).
+    One-shot cloud read: open an AWS-IoT MQTT connection, request the device
+    shadow, return the first full `state.reported` we receive, then close the
+    connection again.
 
-    Runs its own background thread; call start() then stop().
+    Why one-shot rather than a persistent listener: the device accepts local
+    (CoAP) control writes only while no cloud client holds its single active
+    control session. A long-lived shadow subscription silently locks out every
+    local `set` — the device keeps reporting state but stops acting on local
+    commands. We therefore touch the cloud only long enough to lift the device
+    out of its cold "won't serve local status" state and grab the initial
+    snapshot, then hand the control channel straight back to the local session.
+
+    Returns the reported dict, or None on timeout. Network/auth failures raise.
     """
+    cloud = PhilipsCloud(guest_id)
+    topics = _topics(device_id)
 
-    def __init__(
-        self,
-        guest_id: str,
-        device_id: str,
-        on_state: Callable[[dict], None],
-        log: Callable[[str, str], None] = lambda lvl, m: None,
-    ):
-        self.guest_id = guest_id
-        self.device_id = device_id
-        self.on_state = on_state
-        self.log = log
-        self.topics = _topics(device_id)
+    # token -> bind (idempotent) -> mqttInfo -> presigned wss:// URL
+    cloud.get_token()
+    meta = cloud.bind(device_id).get("meta", {})
+    log("debug", f"cloud bind {device_id}: {meta.get('message')}")
+    infos = cloud.mqtt_info([device_id])
+    if not infos:
+        raise RuntimeError("mqttInfo returned no entries (device not bound?)")
+    info = infos[0]
+    u = urllib.parse.urlsplit(info["host"])
+    host, path, client_id = u.hostname, info["path"], info["client_id"]
 
-        self._cloud = PhilipsCloud(guest_id)
-        self._client: Optional[mqtt.Client] = None
-        self._state: dict = {}
-        self._state_lock = threading.Lock()
-        self._stop = threading.Event()
-        self._connected = threading.Event()
-        self._thread: Optional[threading.Thread] = None
-        self._url_fetched_at = 0.0
+    result: dict = {}
+    got = threading.Event()
 
-    # ---- lifecycle ----
-
-    def start(self) -> None:
-        self._thread = threading.Thread(target=self._run, name="cloud-shadow", daemon=True)
-        self._thread.start()
-
-    def stop(self) -> None:
-        self._stop.set()
-        c = self._client
-        if c is not None:
-            try:
-                c.loop_stop()
-                c.disconnect()
-            except Exception:
-                pass
-        if self._thread:
-            self._thread.join(timeout=5)
-
-    # ---- internals ----
-
-    def _bootstrap_url(self) -> tuple[str, str, str]:
-        """token -> bind (idempotent) -> mqttInfo -> (host, path, client_id)."""
-        self._cloud.get_token()
-        meta = self._cloud.bind(self.device_id).get("meta", {})
-        self.log("debug", f"cloud bind {self.device_id}: {meta.get('message')}")
-        infos = self._cloud.mqtt_info([self.device_id])
-        if not infos:
-            raise RuntimeError("mqttInfo returned no entries (device not bound?)")
-        info = infos[0]
-        u = urllib.parse.urlsplit(info["host"])
-        self._url_fetched_at = time.time()
-        return u.hostname, info["path"], info["client_id"]
-
-    def _run(self) -> None:
-        backoff = 5
-        while not self._stop.is_set():
-            try:
-                host, path, client_id = self._bootstrap_url()
-                self.log("debug", f"cloud connecting {host} (client_id={client_id})")
-                self._connect(host, path, client_id)
-                backoff = 5
-                # Hold the connection until it's time to refresh the (1 h) URL
-                # or we lose the connection / are asked to stop.
-                while not self._stop.is_set():
-                    if time.time() - self._url_fetched_at > URL_REFRESH_SEC:
-                        self.log("debug", "cloud presigned URL ageing — refreshing")
-                        break
-                    if self._client is None or not self._client.is_connected():
-                        self.log("warn", "cloud MQTT not connected — reconnecting")
-                        break
-                    self._stop.wait(5)
-                self._teardown_client()
-            except Exception as exc:
-                self.log("warn", f"cloud listener error: {type(exc).__name__}: {exc}")
-                self._teardown_client()
-                self._stop.wait(backoff)
-                backoff = min(backoff * 2, 120)
-
-    def _connect(self, host: str, path: str, client_id: str) -> None:
-        c = mqtt.Client(client_id=client_id, transport="websockets")
-        c.on_connect = self._on_connect
-        c.on_message = self._on_message
-        c.on_disconnect = self._on_disconnect
-        # AWS IoT signed SignedHeaders=host with the bare endpoint; Paho would
-        # otherwise send "host:443" and break the SigV4 signature.
-        c.ws_set_options(
-            path=path,
-            headers=lambda h: {**h, "Host": host, "Origin": f"https://{host}"},
-        )
-        c.tls_set()
-        self._connected.clear()
-        c.connect(host, 443, keepalive=30)
-        self._client = c
-        c.loop_start()
-        if not self._connected.wait(timeout=20):
-            raise RuntimeError("cloud MQTT connect timeout")
-
-    def _teardown_client(self) -> None:
-        c = self._client
-        self._client = None
-        if c is not None:
-            try:
-                c.loop_stop()
-                c.disconnect()
-            except Exception:
-                pass
-
-    # ---- paho callbacks ----
-
-    def _on_connect(self, client, userdata, flags, rc):
+    def on_connect(client, userdata, flags, rc):
         if rc != 0:
-            self.log("warn", f"cloud MQTT rc={rc}")
+            log("warn", f"cloud MQTT rc={rc}")
             return
-        for t in (
-            self.topics["get_accepted"],
-            self.topics["update_accepted"],
-            self.topics["update_documents"],
-        ):
-            client.subscribe(t, qos=1)
+        client.subscribe(topics["get_accepted"], qos=1)
         # request the current full shadow -> delivers the initial state
-        client.publish(self.topics["get"], payload="", qos=1)
-        self._connected.set()
-        self.log("debug", "cloud MQTT connected + shadow/get requested")
+        client.publish(topics["get"], payload="", qos=1)
+        log("debug", "cloud MQTT connected + shadow/get requested")
 
-    def _on_message(self, client, userdata, msg):
+    def on_message(client, userdata, msg):
         reported = _extract_reported(msg.payload)
-        if not reported:
-            return
-        with self._state_lock:
-            self._state.update(reported)
-            full = dict(self._state)
-        try:
-            self.on_state(full)
-        except Exception as exc:
-            self.log("warn", f"on_state callback error: {exc}")
+        if reported:
+            result.update(reported)
+            got.set()
 
-    def _on_disconnect(self, client, userdata, rc):
-        if rc != 0:
-            self.log("debug", f"cloud MQTT disconnected rc={rc}")
+    c = mqtt.Client(client_id=client_id, transport="websockets")
+    c.on_connect = on_connect
+    c.on_message = on_message
+    # AWS IoT signed SignedHeaders=host with the bare endpoint; Paho would
+    # otherwise send "host:443" and break the SigV4 signature.
+    c.ws_set_options(
+        path=path,
+        headers=lambda h: {**h, "Host": host, "Origin": f"https://{host}"},
+    )
+    c.tls_set()
+    log("debug", f"cloud connecting {host} (client_id={client_id})")
+    c.connect(host, 443, keepalive=30)
+    c.loop_start()
+    try:
+        if not got.wait(timeout=timeout):
+            log("warn", "cloud shadow fetch timed out")
+            return None
+        return dict(result)
+    finally:
+        try:
+            c.loop_stop()
+            c.disconnect()
+        except Exception:
+            pass
 
 
 # Tiny CLI for manual testing:  python philips_cloud.py <guest_id> <device_id>
@@ -329,13 +250,9 @@ if __name__ == "__main__":
     def _log(lvl, m):
         print(f"[{lvl}] {m}", flush=True)
 
-    def _state(rep):
-        keys = {k: rep.get(k) for k in ("D01102", "D0310C", "D03105", "D0313B", "D03125") if k in rep}
-        print(f"[state] {keys} (total {len(rep)} keys)", flush=True)
-
-    sl = ShadowListener(gid, did, _state, _log)
-    sl.start()
-    try:
-        time.sleep(float(sys.argv[3]) if len(sys.argv) > 3 else 30)
-    finally:
-        sl.stop()
+    reported = fetch_shadow_once(gid, did, _log)
+    if reported:
+        keys = {k: reported.get(k) for k in ("D01102", "D0310C", "D03105", "D0313B", "D03125") if k in reported}
+        print(f"[state] {keys} (total {len(reported)} keys)", flush=True)
+    else:
+        print("[state] no shadow returned", flush=True)

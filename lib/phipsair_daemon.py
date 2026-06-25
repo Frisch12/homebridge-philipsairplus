@@ -42,13 +42,13 @@ except Exception as exc:  # pragma: no cover — install issue
     sys.stderr.write(f"phipsair import failed: {exc}\n")
     sys.exit(2)
 
-# Cloud status source (AWS-IoT device shadow). Optional: if its dependencies
+# Cloud bootstrap source (AWS-IoT device shadow). Optional: if its dependencies
 # (requests / paho-mqtt) are not installed, the daemon still works in
-# local-only mode — it just won't have a reliable initial-state / push source.
+# local-only mode — it just won't have a reliable initial-state source.
 try:
-    from philips_cloud import ShadowListener
+    from philips_cloud import fetch_shadow_once
 except Exception as exc:  # pragma: no cover — optional dependency
-    ShadowListener = None  # type: ignore[assignment]
+    fetch_shadow_once = None  # type: ignore[assignment]
     _CLOUD_IMPORT_ERROR = str(exc)
 else:
     _CLOUD_IMPORT_ERROR = ""
@@ -78,7 +78,7 @@ DEFAULT_OBSERVE_IDLE_SEC = 60.0
 
 
 # stdout is written from both the asyncio loop (local observe/set) and the
-# cloud listener's background thread, so serialize writes.
+# cloud bootstrap's executor / paho threads, so serialize writes.
 _emit_lock = threading.Lock()
 
 
@@ -101,10 +101,10 @@ class Daemon:
         self.port = port
         self.keepalive_sec = keepalive_sec
         self.idle_rebuild_sec = idle_rebuild_sec
-        # Cloud (AWS-IoT shadow) status source. Both must be set to enable it.
+        # Cloud (AWS-IoT shadow) bootstrap source. Both must be set to enable it.
         self.guest_id = guest_id
         self.device_id = device_id
-        self.cloud: Any = None  # ShadowListener instance once started
+        self._bootstrap_task: asyncio.Task | None = None  # one-shot cloud read
         self.client: Client | None = None
         self._last_frame_at = 0.0
         self._stop = asyncio.Event()
@@ -120,12 +120,8 @@ class Daemon:
 
     async def shutdown(self) -> None:
         self._stop.set()
-        if self.cloud is not None:
-            try:
-                self.cloud.stop()
-            except Exception as exc:
-                log("debug", f"cloud shutdown error: {exc}")
-            self.cloud = None
+        if self._bootstrap_task is not None and not self._bootstrap_task.done():
+            self._bootstrap_task.cancel()
         if self.client is not None:
             try:
                 await self.client.shutdown()
@@ -133,20 +129,39 @@ class Daemon:
                 log("debug", f"shutdown error: {exc}")
             self.client = None
 
-    # ------------- cloud status source (AWS-IoT shadow) -------------
+    # ------------- cloud bootstrap (AWS-IoT shadow, one-shot) -------------
 
-    async def start_cloud(self) -> None:
+    def schedule_cloud_bootstrap(self) -> None:
         """
-        Start the cloud shadow listener. The CX-series devices won't serve
-        their local status until cloud-activated; the AWS-IoT device shadow
-        mirrors the exact same `state.reported` keys as a local observe frame,
-        so we feed it straight into the normal status pipeline.
+        Fire a one-shot cloud shadow read in the background, replacing any
+        previous bootstrap still in flight. Used at startup and after every
+        local reconnect — see bootstrap_from_cloud() for the why.
+        """
+        if self._bootstrap_task is not None and not self._bootstrap_task.done():
+            self._bootstrap_task.cancel()
+        self._bootstrap_task = asyncio.create_task(
+            self.bootstrap_from_cloud(), name="cloud-bootstrap")
+
+    async def bootstrap_from_cloud(self) -> None:
+        """
+        Read the device's AWS-IoT shadow exactly once for the initial state,
+        then drop the cloud connection again.
+
+        The CX-series devices won't serve their local status until they have
+        been cloud-activated; a single shadow read lifts them out of that cold
+        state. Crucially we must NOT hold the cloud connection open: the device
+        has a single active control session, and while the cloud owns it every
+        local CoAP `set` is silently ignored. So we grab the snapshot and hand
+        the control channel straight back to the local session.
+
+        The shadow's `state.reported` uses the same `D…` keys as a local
+        observe frame, so we feed it straight into the normal status pipeline.
         """
         if not self.guest_id:
-            log("debug", "cloud status source not configured (no guest-id)")
+            log("debug", "cloud bootstrap not configured (no guest-id)")
             return
-        if ShadowListener is None:
-            log("warn", f"cloud status source unavailable: {_CLOUD_IMPORT_ERROR}")
+        if fetch_shadow_once is None:
+            log("warn", f"cloud bootstrap unavailable: {_CLOUD_IMPORT_ERROR}")
             return
 
         device_id = self.device_id
@@ -157,19 +172,25 @@ class Daemon:
             except Exception as exc:
                 log("warn", f"cloud: could not read device_id locally: {exc}")
         if not device_id:
-            log("warn", "cloud status source disabled: no device-id available")
+            log("warn", "cloud bootstrap disabled: no device-id available")
             return
 
-        def on_state(reported: dict[str, Any]) -> None:
-            # Invoked from the listener's background thread; emit() is locked.
+        loop = asyncio.get_event_loop()
+        try:
+            reported = await loop.run_in_executor(
+                None, fetch_shadow_once, self.guest_id, device_id, log)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log("warn", f"cloud bootstrap failed: {type(exc).__name__}: {exc}")
+            return
+        if reported:
             emit({"type": "status", "data": reported})
-
-        def clog(level: str, message: str) -> None:
-            log(level, message)
-
-        self.cloud = ShadowListener(self.guest_id, device_id, on_state, clog)
-        self.cloud.start()
-        log("info", f"cloud status source started for device {device_id}")
+            log("info",
+                f"cloud bootstrap: initial state for {device_id} "
+                f"({len(reported)} keys); connection closed")
+        else:
+            log("debug", "cloud bootstrap: no shadow state returned")
 
     # ------------- observe -------------
 
@@ -296,6 +317,9 @@ class Daemon:
             await self.connect()
             self._last_frame_at = asyncio.get_event_loop().time()
             emit({"type": "ready"})
+            # Re-seed the initial state via a one-shot cloud read — the device
+            # may have gone cold again across the reconnect.
+            self.schedule_cloud_bootstrap()
         except Exception as exc:
             log("warn", f"reconnect failed: {exc}")
 
@@ -363,10 +387,12 @@ class Daemon:
             return 1
         emit({"type": "ready"})
 
-        # Start the cloud shadow status source (initial state + reliable
-        # change pushes). Local observe stays up as a fast complement and for
-        # the case where the device has been warmed by something else.
-        await self.start_cloud()
+        # One-shot cloud read for the initial state (fire-and-forget so local
+        # observe starts immediately). The connection is closed again right
+        # after — we never hold the device's control session, otherwise local
+        # `set` writes get silently ignored. Local observe is the steady-state
+        # status source from here on.
+        self.schedule_cloud_bootstrap()
 
         tasks = [
             asyncio.create_task(self.observe_loop(), name="observe"),
