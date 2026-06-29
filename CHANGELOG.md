@@ -2,6 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.4.1] - 2026-06-29
+- **Fix: orphaned daemons no longer linger after a restart.** When Homebridge (or its child bridge) was stopped or restarted, the per-device Python daemon could survive its parent's death and keep running for days — each orphan still holding observe/sync/cloud sessions to the same device. Multiple stale clients per device can destabilise control (a likely contributor to "the device stops responding after a while"). The daemon now exits when its parent goes away, via three complementary mechanisms: a portable parent-watch loop (`getppid()` change ⇒ orphaned ⇒ shut down), `SIGTERM`/`SIGINT` handlers for a clean shutdown on systemd restarts, and Linux `PR_SET_PDEATHSIG` for an immediate kill-on-parent-death fast path.
+
 ## [2.4.0] - 2026-06-29
 - **New per-device `localOnlyMode` option (default off).** Switches a device fully to local control: the cloud is never contacted — not at startup and not on reconnect — so a hung or expired anonymous AWS-IoT guest session can no longer block local commands. It overrides `cloudStatus`.
 - **Local keepalive fixes the "unresponsive after ~60 min" problem.** When `localOnlyMode` is on, the daemon re-asserts the device's beep state (`D03130`) on a fixed cadence to keep the device's local control session warm. CX-series units appear to drop their control session after roughly an hour of pure observe traffic, after which every `set` is silently ignored; exercising the control channel prevents that. The keepalive re-writes the *last reported* value (falling back to beep-off until the first status frame), so it stays silent and never overrides a Beep switch you set yourself. Interval is configurable via the new `localKeepaliveSec` option (default **60 s**, `0` disables it).

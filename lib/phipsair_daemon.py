@@ -31,6 +31,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
+import signal
 import sys
 import threading
 import traceback
@@ -79,6 +81,28 @@ DEFAULT_OBSERVE_IDLE_SEC = 60.0
 # Upper bound on a single cloud shadow read. Past this we abandon the bootstrap
 # rather than risk holding the device's control session (see Gotcha #1).
 CLOUD_BOOTSTRAP_TIMEOUT_SEC = 30.0
+
+# How often the parent-watch checks whether our parent (the Node plugin) is gone.
+PARENT_WATCH_SEC = 5.0
+
+
+def _set_parent_death_signal() -> None:
+    """
+    Linux fast-path: ask the kernel to SIGTERM us the moment our parent dies, so
+    an orphaned daemon exits immediately instead of lingering. Best-effort and
+    racy (misses a parent that died before this call) — the parent-watch loop is
+    the portable backstop that always catches it within PARENT_WATCH_SEC.
+    """
+    if sys.platform != "linux":
+        return
+    try:
+        import ctypes
+
+        PR_SET_PDEATHSIG = 1
+        libc = ctypes.CDLL("libc.so.6", use_errno=True)
+        libc.prctl(PR_SET_PDEATHSIG, signal.SIGTERM)
+    except Exception as exc:  # pragma: no cover — non-glibc / no ctypes
+        log("debug", f"PR_SET_PDEATHSIG unavailable: {exc}")
 
 
 # stdout is written from both the asyncio loop (local observe/set) and the
@@ -394,6 +418,31 @@ class Daemon:
                 log("warn",
                     f"local keepalive failed: {exc.__class__.__name__}: {exc}")
 
+    async def parent_watch_loop(self) -> None:
+        """
+        Exit when our parent (the Node plugin / child-bridge process) goes away.
+
+        stdin_loop already shuts down on stdin EOF, but orphaned daemons have
+        been observed in the field surviving their parent's death for *days*
+        (PPID reparented away from the original parent), each still holding
+        observe/sync/cloud sessions to the same device — multiple stale clients
+        per device, which can destabilise control. This is a portable backstop:
+        a process's parent PID only changes when the original parent dies, so
+        `getppid() != start_ppid` is a precise "we have been orphaned" signal.
+        """
+        start_ppid = os.getppid()
+        while not self._stop.is_set():
+            try:
+                await asyncio.sleep(PARENT_WATCH_SEC)
+            except asyncio.CancelledError:
+                raise
+            ppid = os.getppid()
+            if ppid != start_ppid:
+                log("warn",
+                    f"parent gone (ppid {start_ppid} -> {ppid}) — shutting down")
+                self._stop.set()
+                return
+
     async def _reconnect(self) -> None:
         if self.client is not None:
             try:
@@ -474,6 +523,15 @@ class Daemon:
     # ------------- main -------------
 
     async def run(self) -> int:
+        # Clean shutdown when systemd (or anything) sends SIGTERM/SIGINT on a
+        # restart, so we close CoAP/cloud sessions instead of being hard-killed.
+        loop = asyncio.get_event_loop()
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            try:
+                loop.add_signal_handler(sig, self._stop.set)
+            except (NotImplementedError, RuntimeError):
+                pass  # signal handlers unsupported on this platform/loop
+
         try:
             await self.connect()
         except Exception as exc:
@@ -495,6 +553,7 @@ class Daemon:
             asyncio.create_task(self.observe_loop(), name="observe"),
             asyncio.create_task(self.keepalive_loop(), name="keepalive"),
             asyncio.create_task(self.stdin_loop(), name="stdin"),
+            asyncio.create_task(self.parent_watch_loop(), name="parent-watch"),
         ]
         if (self.local_keepalive_key is not None
                 and self.local_keepalive_value is not None
@@ -553,6 +612,9 @@ def main() -> int:
         local_keepalive_value=args.local_keepalive_value,
         local_keepalive_sec=args.local_keepalive_sec,
     )
+    # Linux fast-path so an orphaned daemon dies immediately; the parent-watch
+    # loop in run() is the portable backstop.
+    _set_parent_death_signal()
     try:
         return asyncio.run(daemon.run())
     except KeyboardInterrupt:

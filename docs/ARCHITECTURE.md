@@ -129,6 +129,20 @@ plugin supplies the key + fallback value from the device profile
 `D03130 = 0`. A device whose profile has no beep control gets a warning and no
 keepalive.
 
+## Daemon lifecycle
+
+The plugin spawns one daemon per device and is responsible for tearing it down.
+On a clean Homebridge shutdown the `AirControlHandler` sends `{type:"shutdown"}`
+and kills the process; the daemon also stops on stdin EOF. But neither path is
+guaranteed on an abrupt restart, and orphaned daemons were observed surviving
+their parent for days — each still holding observe/sync/cloud sessions, i.e.
+several stale clients fighting over one device. The daemon therefore self-exits
+when its parent goes away, three ways: a **parent-watch loop** (`getppid()`
+changing from its start value is a precise "orphaned" signal — portable backstop,
+fires within `PARENT_WATCH_SEC`), **`SIGTERM`/`SIGINT` handlers** that trigger a
+clean shutdown on systemd restarts, and Linux **`PR_SET_PDEATHSIG`** for an
+immediate kill the moment the parent dies.
+
 ## Profiles
 
 Each model is described by a `DeviceProfile` (`src/profiles/`) listing the exact
