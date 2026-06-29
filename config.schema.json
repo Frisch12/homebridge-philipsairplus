@@ -62,15 +62,15 @@
               "title": "Local-only mode (no cloud + keepalive)",
               "type": "boolean",
               "default": false,
-              "description": "Switches the device fully to local control: the cloud is never contacted (overrides the Cloud status source above) and is skipped on reconnect, so a hung or expired cloud session can never block local commands. In addition, the daemon writes a silent beep-off command every few seconds to keep the device's local control session warm — this fixes CX-series devices that stop responding after roughly 60 minutes."
+              "description": "Switches the device fully to local control: the cloud is never contacted (overrides the Cloud status source above) and is skipped on reconnect, so a hung or expired cloud session can never block local commands. To keep the local control session warm (fixes CX-series devices that stop responding after roughly 60 minutes), the daemon silences the beep once and then periodically pokes the oscillation control with an out-of-range value the device rejects but answers with a fresh status — silent, no physical change. The Beep switch is hidden in this mode (beep is forced off so the poke stays silent)."
             },
             "localKeepaliveSec": {
-              "title": "Local keepalive interval (seconds)",
+              "title": "Local keepalive poke interval (seconds)",
               "type": "integer",
               "default": 60,
               "minimum": 0,
               "maximum": 600,
-              "description": "How often the silent beep-off keepalive is sent in local-only mode. 0 disables the keepalive. Only used when local-only mode is enabled.",
+              "description": "How often the silent keepalive poke is sent in local-only mode. 0 disables the keepalive. Only used when local-only mode is enabled.",
               "condition": { "functionBody": "try { return model.devices[arrayIndices[0]].active && model.devices[arrayIndices[0]].localOnlyMode } catch(e){ return false }" }
             },
             "name": {
@@ -190,6 +190,13 @@
               "type": "boolean",
               "default": true,
               "description": "Purifier/fan only. When off, the LED / Backlight (Lightbulb) is NOT created in Homebridge/HomeKit. Turn off if Siri confuses the device's light with the fan. Only shown if the chosen profile has a backlight control.",
+              "condition": { "functionBody": "try { return model.devices[arrayIndices[0]].active && (model.devices[arrayIndices[0]].deviceType || 'auto') !== 'heater' } catch(e){ return false }" }
+            },
+            "emitTemperatureSensor": {
+              "title": "Expose temperature sensor",
+              "type": "boolean",
+              "default": true,
+              "description": "Purifier/fan only. When off, the TemperatureSensor service is NOT created in Homebridge/HomeKit. Turn off for devices like the CX3550 that report a temperature D-code but have no real sensor (the value is hardcoded, e.g. ~20 °C). Only shown if the chosen profile declares a temperature sensor.",
               "condition": { "functionBody": "try { return model.devices[arrayIndices[0]].active && (model.devices[arrayIndices[0]].deviceType || 'auto') !== 'heater' } catch(e){ return false }" }
             },
             "customProfile": {
@@ -378,6 +385,7 @@
             "devices[].emitSleepSwitch",
             "devices[].emitBeepSwitch",
             "devices[].emitLedSwitch",
+            "devices[].emitTemperatureSensor",
             {
               "key": "devices[].customProfile",
               "type": "fieldset",

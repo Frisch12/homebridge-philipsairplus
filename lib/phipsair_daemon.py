@@ -125,9 +125,11 @@ def log(level: str, message: str) -> None:
 class Daemon:
     def __init__(self, host: str, port: int, keepalive_sec: float, idle_rebuild_sec: float,
                  guest_id: str | None = None, device_id: str | None = None,
-                 local_keepalive_key: str | None = None,
-                 local_keepalive_value: int | None = None,
-                 local_keepalive_sec: float = 0.0):
+                 local_silence_key: str | None = None,
+                 local_silence_value: int | None = None,
+                 local_poke_key: str | None = None,
+                 local_poke_value: int | None = None,
+                 local_poke_sec: float = 0.0):
         self.host = host
         self.port = port
         self.keepalive_sec = keepalive_sec
@@ -135,18 +137,22 @@ class Daemon:
         # Cloud (AWS-IoT shadow) bootstrap source. Both must be set to enable it.
         self.guest_id = guest_id
         self.device_id = device_id
-        # Local-only keepalive: periodically re-assert a single key to keep the
-        # device's local control session warm. The plugin passes the profile's
-        # "beep off" pair as the *fallback* — once a status frame is seen, the
-        # loop re-writes the last reported value instead, so it never clobbers a
-        # user-set value (e.g. Beep=on). Only active when key + value + sec set.
-        self.local_keepalive_key = local_keepalive_key
-        self.local_keepalive_value = local_keepalive_value
-        self.local_keepalive_sec = local_keepalive_sec
-        # Last value the device reported for local_keepalive_key (None until the
-        # first status frame). Drives the re-assert; falls back to the configured
-        # value while still None.
-        self._last_keepalive_value: int | None = None
+        # Local-only mode keepalive, two phases:
+        #  1. silence — write the beep-off key ONCE on connect/reconnect, so the
+        #     device stops emitting a confirmation chirp on every later write.
+        #     (Writing the beep key itself chirps once; that single beep is the
+        #     price of going silent and only happens on (re)connect.)
+        #  2. poke — every local_poke_sec, write an out-of-range value to a
+        #     harmless control key (oscillation). The device rejects the value
+        #     (no physical change) but answers with a fresh status frame, which
+        #     keeps the local control session warm. With beep silenced this is
+        #     inaudible. The poke key must NOT be the beep key — writing the beep
+        #     key chirps every time, which was the cause of the per-tick beeping.
+        self.local_silence_key = local_silence_key
+        self.local_silence_value = local_silence_value
+        self.local_poke_key = local_poke_key
+        self.local_poke_value = local_poke_value
+        self.local_poke_sec = local_poke_sec
         self._bootstrap_task: asyncio.Task | None = None  # one-shot cloud read
         self.client: Client | None = None
         self._last_frame_at = 0.0
@@ -241,7 +247,6 @@ class Daemon:
             log("warn", f"cloud bootstrap failed: {type(exc).__name__}: {exc}")
             return
         if reported:
-            self._note_keepalive_state(reported)
             emit({"type": "status", "data": reported})
             log("info",
                 f"cloud bootstrap: initial state for {device_id} "
@@ -323,19 +328,7 @@ class Daemon:
                 f"skipping unreadable observe frame: {exc.__class__.__name__} "
                 f"len={len(raw)} head={raw[:40]!r}")
             return
-        self._note_keepalive_state(reported)
         emit({"type": "status", "data": reported})
-
-    def _note_keepalive_state(self, reported: Any) -> None:
-        """Remember the device's last reported value for the keepalive key, so
-        the keepalive can re-assert it rather than forcing a fixed value."""
-        key = self.local_keepalive_key
-        if key is None or not isinstance(reported, dict) or key not in reported:
-            return
-        try:
-            self._last_keepalive_value = int(reported[key])
-        except (TypeError, ValueError):
-            pass
 
     # ------------- sync keepalive -------------
 
@@ -375,48 +368,55 @@ class Daemon:
                     await self._reconnect()
                     sync_failures = 0
 
-    async def local_keepalive_loop(self) -> None:
+    async def send_silence(self) -> None:
         """
-        Local-only keepalive: periodically re-assert a single key to keep the
-        device's local control session warm.
+        Write the beep-off key once so subsequent poke writes are inaudible.
 
-        Background: CX-series units appear to drop their local control session
-        after roughly an hour of pure observe traffic, after which every `set`
-        is silently ignored. Exercising the control channel with a write on a
-        fixed cadence prevents that.
-
-        To avoid clobbering a user-set value, we re-write the *last value the
-        device reported* for this key (tracked via _note_keepalive_state),
-        falling back to the configured value only until the first status frame
-        arrives. Re-asserting the current value is a no-op state change, so the
-        device's observe echo carries no surprise and HomeKit stays consistent
-        (e.g. a user's Beep=on is preserved). We reuse do_set() so the write
-        serializes against sync/observe via _coap_lock, and we never emit a
-        set_result for it (it bypasses _dispatch) to keep HomeKit quiet.
+        Writing the beep key itself emits a single confirmation chirp on these
+        devices, so this runs only on connect / reconnect — never on the poke
+        loop. After it, control writes to *other* keys are silent.
         """
-        key = self.local_keepalive_key
-        fallback = self.local_keepalive_value
-        if key is None or fallback is None or self.local_keepalive_sec <= 0:
+        key = self.local_silence_key
+        value = self.local_silence_value
+        if key is None or value is None or self.client is None:
+            return
+        try:
+            await self.do_set({key: value})
+            log("debug", f"silence write ok ({key}={value})")
+        except Exception as exc:
+            log("warn", f"silence write failed: {exc.__class__.__name__}: {exc}")
+
+    async def local_poke_loop(self) -> None:
+        """
+        Local-only keepalive poke. Every local_poke_sec, write an out-of-range
+        value to a harmless control key (oscillation). The device rejects the
+        value — no physical change — but replies with a fresh status frame, which
+        keeps the local control session warm so it does not go dead after ~an
+        hour of pure observe traffic. Inaudible because send_silence() has
+        already turned the device's write-confirmation beep off.
+
+        do_set() serializes the write against sync/observe via _coap_lock, and
+        it bypasses _dispatch so no set_result is emitted (keeps HomeKit quiet).
+        """
+        key = self.local_poke_key
+        value = self.local_poke_value
+        if key is None or value is None or self.local_poke_sec <= 0:
             return
         while not self._stop.is_set():
             try:
-                await asyncio.sleep(self.local_keepalive_sec)
+                await asyncio.sleep(self.local_poke_sec)
                 if self._stop.is_set():
                     return
                 if self.client is None:
                     # Mid-reconnect — skip this tick, try again next cycle.
                     continue
-                value = self._last_keepalive_value
-                if value is None:
-                    value = fallback
                 await self.do_set({key: value})
-                log("debug", f"local keepalive ok ({key}={value})")
+                log("debug", f"local poke ok ({key}={value})")
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                # Never let a single failed write kill the keepalive loop.
-                log("warn",
-                    f"local keepalive failed: {exc.__class__.__name__}: {exc}")
+                # Never let a single failed write kill the poke loop.
+                log("warn", f"local poke failed: {exc.__class__.__name__}: {exc}")
 
     async def parent_watch_loop(self) -> None:
         """
@@ -454,6 +454,9 @@ class Daemon:
             await self.connect()
             self._last_frame_at = asyncio.get_event_loop().time()
             emit({"type": "ready"})
+            # The device may have re-enabled its write-confirmation beep across
+            # the reconnect — silence it again before the poke loop resumes.
+            await self.send_silence()
             # Re-seed the initial state via a one-shot cloud read — but only if
             # the cloud source is configured at all. In local-only mode we never
             # touch the cloud on reconnect (no guest id was passed), so a failing
@@ -549,21 +552,25 @@ class Daemon:
         if self.guest_id:
             self.schedule_cloud_bootstrap()
 
+        # Local-only: silence the device once up front so the periodic poke is
+        # inaudible (see send_silence / local_poke_loop).
+        await self.send_silence()
+
         tasks = [
             asyncio.create_task(self.observe_loop(), name="observe"),
             asyncio.create_task(self.keepalive_loop(), name="keepalive"),
             asyncio.create_task(self.stdin_loop(), name="stdin"),
             asyncio.create_task(self.parent_watch_loop(), name="parent-watch"),
         ]
-        if (self.local_keepalive_key is not None
-                and self.local_keepalive_value is not None
-                and self.local_keepalive_sec > 0):
+        if (self.local_poke_key is not None
+                and self.local_poke_value is not None
+                and self.local_poke_sec > 0):
             tasks.append(asyncio.create_task(
-                self.local_keepalive_loop(), name="local-keepalive"))
+                self.local_poke_loop(), name="local-poke"))
             log("info",
-                f"local keepalive active: re-asserting {self.local_keepalive_key} "
-                f"(fallback {self.local_keepalive_value}) every "
-                f"{self.local_keepalive_sec:.0f}s")
+                f"local keepalive active: silence {self.local_silence_key}="
+                f"{self.local_silence_value}, poke {self.local_poke_key}="
+                f"{self.local_poke_value} every {self.local_poke_sec:.0f}s")
         try:
             await self._stop.wait()
         finally:
@@ -592,13 +599,20 @@ def main() -> int:
     ap.add_argument("--device-id",
                     help="Cloud device id (AWS-IoT thing name). Falls back to the local "
                          "/sys/dev/info device_id if omitted.")
-    ap.add_argument("--local-keepalive-key",
-                    help="D-code written periodically in local-only mode to keep the "
-                         "device's local control session warm (e.g. the beep-off key).")
-    ap.add_argument("--local-keepalive-value", type=int,
-                    help="Value written for --local-keepalive-key (e.g. 0 for beep off).")
-    ap.add_argument("--local-keepalive-sec", type=float, default=0.0,
-                    help="Interval between local keepalive writes (default: 0 = disabled).")
+    ap.add_argument("--local-silence-key",
+                    help="D-code written ONCE on connect/reconnect in local-only mode to "
+                         "silence the device's write-confirmation beep (e.g. the beep key).")
+    ap.add_argument("--local-silence-value", type=int,
+                    help="Value written for --local-silence-key (e.g. 0 for beep off).")
+    ap.add_argument("--local-poke-key",
+                    help="D-code poked periodically in local-only mode to keep the local "
+                         "control session warm (e.g. the oscillation key). Must not be the "
+                         "beep key, which would chirp on every poke.")
+    ap.add_argument("--local-poke-value", type=int,
+                    help="Out-of-range value written for --local-poke-key. The device "
+                         "rejects it (no state change) but replies with a fresh status.")
+    ap.add_argument("--local-poke-sec", type=float, default=0.0,
+                    help="Interval between local poke writes (default: 0 = disabled).")
     args = ap.parse_args()
 
     daemon = Daemon(
@@ -608,9 +622,11 @@ def main() -> int:
         idle_rebuild_sec=args.idle_rebuild_sec,
         guest_id=args.guest_id,
         device_id=args.device_id,
-        local_keepalive_key=args.local_keepalive_key,
-        local_keepalive_value=args.local_keepalive_value,
-        local_keepalive_sec=args.local_keepalive_sec,
+        local_silence_key=args.local_silence_key,
+        local_silence_value=args.local_silence_value,
+        local_poke_key=args.local_poke_key,
+        local_poke_value=args.local_poke_value,
+        local_poke_sec=args.local_poke_sec,
     )
     # Linux fast-path so an orphaned daemon dies immediately; the parent-watch
     # loop in run() is the portable backstop.

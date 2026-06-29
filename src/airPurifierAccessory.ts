@@ -15,6 +15,15 @@ import {
 } from './profiles/state.js';
 
 /**
+ * Out-of-range value written to the oscillation key as the local-only keepalive
+ * "poke". It is neither the on- nor the off-value, so the device rejects it
+ * (no physical change) but still answers with a fresh status frame — which is
+ * what keeps the local control session warm. Configurable here if a model ever
+ * reacts to it; the valid on-value is model-specific (e.g. 17242 on the CX3550).
+ */
+const OSCILLATION_POKE_VALUE = 9999;
+
+/**
  * Profile-driven Homebridge accessory for Philips NEW2 air purifiers / fans.
  *
  * Everything the accessory exposes is decided by its `DeviceProfile`:
@@ -38,6 +47,8 @@ export class AirPurifierAccessory extends AirControlHandler {
   private backlightService?: Service;
   private oscillationService?: Service;
   private sleepService?: Service;
+  /** Whether to expose the (often bogus) TemperatureSensor service. */
+  private emitTemperatureSensor = true;
 
   private readonly state = new DeviceState();
 
@@ -81,8 +92,14 @@ export class AirPurifierAccessory extends AirControlHandler {
     const device = this.accessory.context.device ?? {};
     const emitOscillationSwitch = device.emitOscillationSwitch !== false;
     const emitSleepSwitch = device.emitSleepSwitch !== false;
-    const emitBeepSwitch = device.emitBeepSwitch !== false;
+    // In local-only mode the keepalive forces beep off (so its pokes stay
+    // silent); exposing a Beep switch there would be a lie — it can't be turned
+    // on without making the device chirp on every poke. Hide it in that mode.
+    const emitBeepSwitch = device.emitBeepSwitch !== false && !this.localOnlyMode;
     const emitLedSwitch = device.emitLedSwitch !== false;
+    // The CX3550 reports a temperature D-code but has no real sensor (hardcoded
+    // ~20 °C); let the user hide that bogus TemperatureSensor service.
+    this.emitTemperatureSensor = device.emitTemperatureSensor !== false;
 
     // Accessory information
     this.accessory.getService(S.AccessoryInformation)!
@@ -179,11 +196,22 @@ export class AirPurifierAccessory extends AirControlHandler {
       this.removeLightbulbById('BACKLIGHT');
     }
 
-    // Sensor / filter services come up lazily on the first observe frame.
+    // Sensor / filter services come up lazily on the first observe frame —
+    // except the temperature sensor, which the user can suppress entirely.
+    if (!this.emitTemperatureSensor) {
+      const existingTemp = this.accessory.getServiceById(S.TemperatureSensor, 'TEMP');
+      if (existingTemp) {
+        this.platform.log.info('Removing Temperature sensor (disabled)', this.accessory.displayName);
+        this.accessory.removeService(existingTemp);
+      }
+    }
 
-    // Local-only keepalive writes the profile's beep-off pair (silent + idempotent).
-    this.localKeepaliveKey = this.profile.beep?.key;
-    this.localKeepaliveValue = this.profile.beep?.offValue;
+    // Local-only keepalive: silence the beep once (profile's beep key), then
+    // poke the oscillation key with an out-of-range value (see the daemon).
+    this.localSilenceKey = this.profile.beep?.key;
+    this.localSilenceValue = this.profile.beep?.offValue;
+    this.localPokeKey = this.profile.oscillation?.key;
+    this.localPokeValue = this.profile.oscillation ? OSCILLATION_POKE_VALUE : undefined;
 
     this.longPoll();
   }
@@ -427,7 +455,7 @@ export class AirPurifierAccessory extends AirControlHandler {
         ?? this.accessory.addService(S.AirQualitySensor, `${this.displayName} Air Quality`, 'AIR_QUALITY');
       this.fanService?.addLinkedService(this.airQualityService);
     }
-    if (s?.temperature && !this.temperatureService) {
+    if (s?.temperature && this.emitTemperatureSensor && !this.temperatureService) {
       this.temperatureService = this.accessory.getServiceById(S.TemperatureSensor, 'TEMP')
         ?? this.accessory.addService(S.TemperatureSensor, `${this.displayName} Temperature`, 'TEMP');
       this.fanService?.addLinkedService(this.temperatureService);

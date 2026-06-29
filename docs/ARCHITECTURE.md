@@ -110,24 +110,33 @@ actually configured (`guest_id` present).
   passed to the daemon), so the cloud is contacted neither at startup nor on
   reconnect. The device must already be locally reachable (true once it has been
   warmed by the official app at least once).
-- **Silent re-assert keepalive.** The daemon runs an extra `local_keepalive_loop`
-  that re-writes a single key every `localKeepaliveSec` seconds (default 60,
-  `0` disables). The key is the profile's **beep** D-code (`D03130`); the value
-  is the *last value the device reported* for that key
-  (`_note_keepalive_state`), falling back to **beep-off** (`0`) only until the
-  first status frame arrives. Re-asserting the current value is a no-op state
-  change, so the device's observe echo carries no surprise — a user's `Beep=on`
-  is preserved rather than clobbered. The write goes through the same
-  `do_set` / `_coap_lock` path as a real command, so it exercises the control
-  channel and keeps the session warm without racing sync/observe. A failed
-  keepalive is logged and never tears the loop down.
+- **Two-phase silent keepalive.** Keeping the control session warm needs a
+  periodic *write*, but on these devices **every control write triggers a
+  confirmation chirp** (the reason `sendSet` coalesces) — so a naive keepalive
+  beeps. Worse, writing the **beep** key itself chirps *every* time regardless
+  of value, so it must never be the periodic write. The keepalive is therefore
+  split:
+  1. `send_silence()` writes **beep-off** (`D03130 = 0`) **once** on connect and
+     after every reconnect. This one write chirps a single time, then the
+     device's per-write confirmation beep is off.
+  2. `local_poke_loop` then writes an **out-of-range value to the oscillation
+     key** (`D0320F = 9999`) every `localKeepaliveSec` seconds (default 60,
+     `0` disables). The device rejects the value — no physical state change —
+     but answers with a fresh status frame, which is what keeps the local
+     control session warm. With the beep silenced, the poke is inaudible.
 
-The beep D-code is chosen because writing it never makes the unit chirp (it only
-governs whether *button presses* beep), so the keepalive stays silent. The
-plugin supplies the key + fallback value from the device profile
-(`profile.beep`); the Smart Fan Heater, which has no profile, hard-codes
-`D03130 = 0`. A device whose profile has no beep control gets a warning and no
-keepalive.
+  Both writes go through `do_set` / `_coap_lock`, serialized against
+  sync/observe, and bypass `_dispatch` (no `set_result`, so HomeKit stays
+  quiet). A failed poke is logged and never tears the loop down.
+
+The poke uses an *invalid* value on purpose: a valid re-assert might not produce
+a status reply (the device only pushes on change), whereas a rejected value
+reliably elicits one. The plugin supplies the silence pair from `profile.beep`
+and the poke key from `profile.oscillation` (`9999` via `OSCILLATION_POKE_VALUE`);
+the Smart Fan Heater hard-codes `D03130`/`D0320F`. A device with no oscillation
+control gets a warning and no keepalive. Because beep is forced off in this mode,
+the **Beep switch is hidden** so it can't be toggled on (which would re-introduce
+per-poke chirps).
 
 ## Daemon lifecycle
 

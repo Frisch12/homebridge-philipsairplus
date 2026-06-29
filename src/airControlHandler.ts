@@ -38,18 +38,27 @@ export abstract class AirControlHandler {
   protected cloudEnabled: boolean = true;
   protected keepaliveSec: number;
   /**
-   * Local-only mode: cloud is never contacted, and the daemon periodically
-   * writes a silent keepalive (the profile's beep-off pair) to keep the
-   * device's local control session warm. Fixes CX-series units going
-   * unresponsive after ~60 min of pure observe traffic.
+   * Local-only mode: cloud is never contacted, and the daemon keeps the
+   * device's local control session warm with a two-phase keepalive — silence
+   * the beep once, then periodically poke a harmless control key. Fixes
+   * CX-series units going unresponsive after ~60 min of pure observe traffic.
    */
   protected localOnlyMode: boolean = false;
-  /** Interval for the local keepalive write (seconds); 0 disables it. */
+  /** Interval for the local poke write (seconds); 0 disables the keepalive. */
   protected localKeepaliveSec: number;
-  /** D-code + value the local keepalive writes — set by the subclass from its
-   * profile before calling longPoll() (the base class has no profile). */
-  protected localKeepaliveKey: string | undefined;
-  protected localKeepaliveValue: number | undefined;
+  /**
+   * Keepalive D-codes — set by the subclass from its profile before calling
+   * longPoll() (the base class has no profile):
+   *  - silence: written once on (re)connect to mute the write-confirm beep
+   *    (the beep key + its off value).
+   *  - poke: written every interval to keep the control session warm (a
+   *    non-beep control key, e.g. oscillation, with an out-of-range value the
+   *    device rejects but answers with a fresh status).
+   */
+  protected localSilenceKey: string | undefined;
+  protected localSilenceValue: number | undefined;
+  protected localPokeKey: string | undefined;
+  protected localPokeValue: number | undefined;
 
   private daemonProc: ChildProcess | undefined;
   private shutdownRequested: boolean = false;
@@ -156,19 +165,25 @@ export abstract class AirControlHandler {
         args.push('--device-id', String(this.cloudDeviceId));
       }
     }
-    // Local-only keepalive: ask the daemon to write the profile's silent
-    // beep-off pair on a fixed cadence so the device's local control session
-    // stays alive. Only when the mode is on, a key is known and the interval > 0.
+    // Local-only keepalive: the daemon silences the beep once, then pokes a
+    // harmless control key on a fixed cadence to keep the control session
+    // alive. Only when the mode is on, a poke key is known and interval > 0.
     if (this.localOnlyMode && this.localKeepaliveSec > 0) {
-      if (this.localKeepaliveKey !== undefined && this.localKeepaliveValue !== undefined) {
+      if (this.localPokeKey !== undefined && this.localPokeValue !== undefined) {
+        if (this.localSilenceKey !== undefined && this.localSilenceValue !== undefined) {
+          args.push(
+            '--local-silence-key', String(this.localSilenceKey),
+            '--local-silence-value', String(this.localSilenceValue),
+          );
+        }
         args.push(
-          '--local-keepalive-key', String(this.localKeepaliveKey),
-          '--local-keepalive-value', String(this.localKeepaliveValue),
-          '--local-keepalive-sec', String(this.localKeepaliveSec),
+          '--local-poke-key', String(this.localPokeKey),
+          '--local-poke-value', String(this.localPokeValue),
+          '--local-poke-sec', String(this.localKeepaliveSec),
         );
       } else {
         this.platform.log.warn(
-          'localOnlyMode is on but this device has no beep control — keepalive disabled',
+          'localOnlyMode is on but this device has no oscillation control to poke — keepalive disabled',
           this.accessory.displayName,
         );
       }

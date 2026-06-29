@@ -118,10 +118,11 @@ two ways:
 
 - It **never contacts the cloud** (overrides `cloudStatus`, and skips the cloud bootstrap on
   reconnect), so a hung or expired anonymous guest session can't fight for the control session.
-- It **re-asserts the device's beep state** (`D03130`) every `localKeepaliveSec` seconds to
-  keep the local control session warm. It re-writes the *current* reported value (falling back
-  to beep-off until the first status frame), so it never makes the unit chirp and never
-  overrides a Beep switch you set yourself.
+- It keeps the local control session warm **silently**: it turns the beep off once, then every
+  `localKeepaliveSec` seconds pokes the oscillation control with an out-of-range value the
+  device rejects (no physical change) but answers with a fresh status. Writing the beep key
+  itself chirps, so it is used only for the one-time silencing, never for the periodic poke.
+  The Beep switch is hidden in this mode (beep is forced off so the poke stays silent).
 
 | | |
 |---|---|
@@ -198,6 +199,7 @@ two ways:
 | - emitSleepSwitch  | Purifier only. Expose the Sleep switch to HomeKit (if the profile has a sleep preset). | `true`           | No       |
 | - emitBeepSwitch   | Purifier only. Expose the Beep switch to HomeKit (if the profile has a beep control). | `true`            | No       |
 | - emitLedSwitch    | Purifier only. Expose the LED / Backlight to HomeKit (if the profile has a backlight control). Turn off if Siri confuses it with the fan. | `true` | No |
+| - emitTemperatureSensor | Purifier only. Expose the TemperatureSensor to HomeKit (if the profile declares one). Turn off for devices like the CX3550 that report a temperature D-code but have no real sensor (hardcoded ~20 °C). | `true` | No |
 
 ### Profiles
 

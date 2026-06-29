@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.4.2] - 2026-06-29
+- **Fix: the local-only keepalive no longer makes the device beep.** The previous keepalive wrote the beep D-code (`D03130`) every interval; on these devices *writing the beep key chirps every time*, so the unit beeped once per interval. The keepalive is now two-phase: it silences the beep **once** on connect/reconnect (`D03130 = 0`), then periodically **pokes the oscillation key** (`D0320F`) with an out-of-range value (`9999`) the device rejects — no physical change — but answers with a fresh status frame, which keeps the local control session warm. With the beep silenced, the poke is inaudible.
+- **The Beep switch is hidden in local-only mode.** Beep is forced off so the poke stays silent; exposing a Beep switch that can't be turned on (without re-introducing per-poke beeps) would be misleading.
+- **New per-device `emitTemperatureSensor` option (default on).** Turn off to hide the TemperatureSensor service for devices like the CX3550 that report a temperature D-code but have no real sensor (the value is hardcoded around 20 °C).
+
 ## [2.4.1] - 2026-06-29
 - **Fix: orphaned daemons no longer linger after a restart.** When Homebridge (or its child bridge) was stopped or restarted, the per-device Python daemon could survive its parent's death and keep running for days — each orphan still holding observe/sync/cloud sessions to the same device. Multiple stale clients per device can destabilise control (a likely contributor to "the device stops responding after a while"). The daemon now exits when its parent goes away, via three complementary mechanisms: a portable parent-watch loop (`getppid()` change ⇒ orphaned ⇒ shut down), `SIGTERM`/`SIGINT` handlers for a clean shutdown on systemd restarts, and Linux `PR_SET_PDEATHSIG` for an immediate kill-on-parent-death fast path.
 
