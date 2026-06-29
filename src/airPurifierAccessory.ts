@@ -181,6 +181,10 @@ export class AirPurifierAccessory extends AirControlHandler {
 
     // Sensor / filter services come up lazily on the first observe frame.
 
+    // Local-only keepalive writes the profile's beep-off pair (silent + idempotent).
+    this.localKeepaliveKey = this.profile.beep?.key;
+    this.localKeepaliveValue = this.profile.beep?.offValue;
+
     this.longPoll();
   }
 

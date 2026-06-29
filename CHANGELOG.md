@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.4.0] - 2026-06-29
+- **New per-device `localOnlyMode` option (default off).** Switches a device fully to local control: the cloud is never contacted — not at startup and not on reconnect — so a hung or expired anonymous AWS-IoT guest session can no longer block local commands. It overrides `cloudStatus`.
+- **Local keepalive fixes the "unresponsive after ~60 min" problem.** When `localOnlyMode` is on, the daemon re-asserts the device's beep state (`D03130`) on a fixed cadence to keep the device's local control session warm. CX-series units appear to drop their control session after roughly an hour of pure observe traffic, after which every `set` is silently ignored; exercising the control channel prevents that. The keepalive re-writes the *last reported* value (falling back to beep-off until the first status frame), so it stays silent and never overrides a Beep switch you set yourself. Interval is configurable via the new `localKeepaliveSec` option (default **60 s**, `0` disables it).
+- **Cloud bootstrap is now best-effort on reconnect.** The one-shot shadow read is bounded by a 30 s timeout and a hang/failure is swallowed, so a stalled cloud read can never keep the device's control session occupied (which would silently break local `set`). In local-only mode the cloud bootstrap is skipped entirely.
+
 ## [2.3.1] - 2026-06-25
 - **Fix: Oscillation switch always showed "off" on the CX3550.** The device is set with on-value `17242` but **reads back a different code** (observed: `23040`) while oscillating, with `0` when off. The status was derived as `value === onValue`, which never matched the read-back, so HomeKit showed oscillation as off even while it was running. Status is now derived as `value !== offValue` (anything but the off value counts as oscillating) — robust regardless of the exact code the device returns. Setting was unaffected; only the displayed state was wrong.
 

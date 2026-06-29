@@ -107,6 +107,28 @@ This requires internet connectivity and the `requests` + `paho-mqtt` python pack
 | **Guest identity** | a random id generated once and stored as `.philips-airplus-guest-id` in the Homebridge storage path, shared across all devices. |
 | **Privacy** | enabling this binds your device(s) to that anonymous guest identity on Philips' cloud. Bindings are **additive** and do **not** displace the official app. |
 
+## Local-only mode (`localOnlyMode`)
+
+If your device becomes **unresponsive after roughly an hour** — HomeKit still shows state but
+the fan/heater no longer reacts to commands — turn on **local-only mode** for that device.
+
+CX-series units appear to drop their single local control session after about an hour of pure
+observe traffic, after which every local `set` is silently ignored. Local-only mode fixes this
+two ways:
+
+- It **never contacts the cloud** (overrides `cloudStatus`, and skips the cloud bootstrap on
+  reconnect), so a hung or expired anonymous guest session can't fight for the control session.
+- It **re-asserts the device's beep state** (`D03130`) every `localKeepaliveSec` seconds to
+  keep the local control session warm. It re-writes the *current* reported value (falling back
+  to beep-off until the first status frame), so it never makes the unit chirp and never
+  overrides a Beep switch you set yourself.
+
+| | |
+|---|---|
+| **Config** | per-device `"localOnlyMode": true` (default **false**). |
+| **Interval** | `"localKeepaliveSec"` — seconds between keepalive writes (default **60**, `0` disables the keepalive). |
+| **Requirement** | the device must be locally reachable; no `requests` / `paho-mqtt` needed in this mode. |
+
 ## Example Config
 
 ### Minimal configuration (with auto-detection)

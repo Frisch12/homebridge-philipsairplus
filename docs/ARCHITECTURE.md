@@ -89,6 +89,46 @@ local observe frame, so it feeds the normal status pipeline unchanged.
 
 Disable per device with `cloudStatus: false` to run local-only.
 
+The shadow read is **best-effort**: it is bounded by a 30 s timeout
+(`CLOUD_BOOTSTRAP_TIMEOUT_SEC`) and any failure/timeout is swallowed. A hung
+guest connection must never keep the control session occupied — that is exactly
+the Gotcha #1 failure mode (status keeps flowing, local `set` is silently
+ignored). On reconnect the bootstrap is only re-scheduled when a cloud source is
+actually configured (`guest_id` present).
+
+## Local-only mode (`localOnlyMode`)
+
+> **Gotcha #3 — the local control session goes stale after ~1 h.**
+> On CX-series devices, after roughly an hour of pure observe traffic the device
+> stops accepting local `set` writes — the bridge keeps showing state but no
+> longer reacts to commands. The trigger appears to be an idle control session
+> (and/or a held/expired anonymous cloud guest binding fighting for it).
+
+`localOnlyMode: true` addresses this directly:
+
+- **No cloud, ever.** The mode forces `cloudStatus` off (no `--guest-id` is
+  passed to the daemon), so the cloud is contacted neither at startup nor on
+  reconnect. The device must already be locally reachable (true once it has been
+  warmed by the official app at least once).
+- **Silent re-assert keepalive.** The daemon runs an extra `local_keepalive_loop`
+  that re-writes a single key every `localKeepaliveSec` seconds (default 60,
+  `0` disables). The key is the profile's **beep** D-code (`D03130`); the value
+  is the *last value the device reported* for that key
+  (`_note_keepalive_state`), falling back to **beep-off** (`0`) only until the
+  first status frame arrives. Re-asserting the current value is a no-op state
+  change, so the device's observe echo carries no surprise — a user's `Beep=on`
+  is preserved rather than clobbered. The write goes through the same
+  `do_set` / `_coap_lock` path as a real command, so it exercises the control
+  channel and keeps the session warm without racing sync/observe. A failed
+  keepalive is logged and never tears the loop down.
+
+The beep D-code is chosen because writing it never makes the unit chirp (it only
+governs whether *button presses* beep), so the keepalive stays silent. The
+plugin supplies the key + fallback value from the device profile
+(`profile.beep`); the Smart Fan Heater, which has no profile, hard-codes
+`D03130 = 0`. A device whose profile has no beep control gets a warning and no
+keepalive.
+
 ## Profiles
 
 Each model is described by a `DeviceProfile` (`src/profiles/`) listing the exact

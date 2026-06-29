@@ -2,7 +2,7 @@
   "name": "homebridge-philipsairplus-platform",
   "displayName": "Philips Air+",
   "type": "module",
-  "version": "2.3.1",
+  "version": "2.4.0",
   "description": "Homebridge plugin for Philips Air+ Smart Fan Heater (CX3120, CX5120) and NEW2 air purifiers / fans (CX3550, AC3220, …).",
   "author": "Dennis Fricke",
   "license": "MIT",

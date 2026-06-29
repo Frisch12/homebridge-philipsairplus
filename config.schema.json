@@ -58,6 +58,21 @@
               "default": true,
               "description": "CX-series devices (e.g. CX3550) refuse to serve their local status until cloud-activated — exactly like the official app. When enabled, the plugin reads state from the device's AWS-IoT shadow over an anonymous (guest) connection: reliable initial state and change pushes, no Philips account needed. Requires internet and the python `requests` + `paho-mqtt` packages. Disable to run local-only (status may be unreliable on CX devices)."
             },
+            "localOnlyMode": {
+              "title": "Local-only mode (no cloud + keepalive)",
+              "type": "boolean",
+              "default": false,
+              "description": "Switches the device fully to local control: the cloud is never contacted (overrides the Cloud status source above) and is skipped on reconnect, so a hung or expired cloud session can never block local commands. In addition, the daemon writes a silent beep-off command every few seconds to keep the device's local control session warm — this fixes CX-series devices that stop responding after roughly 60 minutes."
+            },
+            "localKeepaliveSec": {
+              "title": "Local keepalive interval (seconds)",
+              "type": "integer",
+              "default": 60,
+              "minimum": 0,
+              "maximum": 600,
+              "description": "How often the silent beep-off keepalive is sent in local-only mode. 0 disables the keepalive. Only used when local-only mode is enabled.",
+              "condition": { "functionBody": "try { return model.devices[arrayIndices[0]].active && model.devices[arrayIndices[0]].localOnlyMode } catch(e){ return false }" }
+            },
             "name": {
               "title": "Name",
               "type": "string",
@@ -348,6 +363,8 @@
             "devices[].debug",
             "devices[].printProfile",
             "devices[].keepaliveSec",
+            "devices[].localOnlyMode",
+            "devices[].localKeepaliveSec",
             "devices[].pythonBin",
             "devices[].deviceId",
             "devices[].name",

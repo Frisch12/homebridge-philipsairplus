@@ -76,6 +76,10 @@ DEFAULT_KEEPALIVE_SEC = 5.0
 # observe as effectively dead and rebuild it (re-issue observe GET).
 DEFAULT_OBSERVE_IDLE_SEC = 60.0
 
+# Upper bound on a single cloud shadow read. Past this we abandon the bootstrap
+# rather than risk holding the device's control session (see Gotcha #1).
+CLOUD_BOOTSTRAP_TIMEOUT_SEC = 30.0
+
 
 # stdout is written from both the asyncio loop (local observe/set) and the
 # cloud bootstrap's executor / paho threads, so serialize writes.
@@ -96,7 +100,10 @@ def log(level: str, message: str) -> None:
 
 class Daemon:
     def __init__(self, host: str, port: int, keepalive_sec: float, idle_rebuild_sec: float,
-                 guest_id: str | None = None, device_id: str | None = None):
+                 guest_id: str | None = None, device_id: str | None = None,
+                 local_keepalive_key: str | None = None,
+                 local_keepalive_value: int | None = None,
+                 local_keepalive_sec: float = 0.0):
         self.host = host
         self.port = port
         self.keepalive_sec = keepalive_sec
@@ -104,6 +111,18 @@ class Daemon:
         # Cloud (AWS-IoT shadow) bootstrap source. Both must be set to enable it.
         self.guest_id = guest_id
         self.device_id = device_id
+        # Local-only keepalive: periodically re-assert a single key to keep the
+        # device's local control session warm. The plugin passes the profile's
+        # "beep off" pair as the *fallback* — once a status frame is seen, the
+        # loop re-writes the last reported value instead, so it never clobbers a
+        # user-set value (e.g. Beep=on). Only active when key + value + sec set.
+        self.local_keepalive_key = local_keepalive_key
+        self.local_keepalive_value = local_keepalive_value
+        self.local_keepalive_sec = local_keepalive_sec
+        # Last value the device reported for local_keepalive_key (None until the
+        # first status frame). Drives the re-assert; falls back to the configured
+        # value while still None.
+        self._last_keepalive_value: int | None = None
         self._bootstrap_task: asyncio.Task | None = None  # one-shot cloud read
         self.client: Client | None = None
         self._last_frame_at = 0.0
@@ -177,14 +196,28 @@ class Daemon:
 
         loop = asyncio.get_event_loop()
         try:
-            reported = await loop.run_in_executor(
-                None, fetch_shadow_once, self.guest_id, device_id, log)
+            # Bound the blocking cloud read: anonymous AWS-IoT guest credentials
+            # can expire/stall, and a hung shadow read must never keep the
+            # device's control session occupied (Gotcha #1) — that is exactly
+            # what makes local `set` writes silently fail. On timeout we simply
+            # give up the bootstrap; local observe stays the steady-state source.
+            reported = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None, fetch_shadow_once, self.guest_id, device_id, log),
+                timeout=CLOUD_BOOTSTRAP_TIMEOUT_SEC,
+            )
         except asyncio.CancelledError:
             raise
+        except asyncio.TimeoutError:
+            log("warn",
+                f"cloud bootstrap timed out after {CLOUD_BOOTSTRAP_TIMEOUT_SEC:.0f}s "
+                "— ignoring, continuing local-only")
+            return
         except Exception as exc:
             log("warn", f"cloud bootstrap failed: {type(exc).__name__}: {exc}")
             return
         if reported:
+            self._note_keepalive_state(reported)
             emit({"type": "status", "data": reported})
             log("info",
                 f"cloud bootstrap: initial state for {device_id} "
@@ -266,7 +299,19 @@ class Daemon:
                 f"skipping unreadable observe frame: {exc.__class__.__name__} "
                 f"len={len(raw)} head={raw[:40]!r}")
             return
+        self._note_keepalive_state(reported)
         emit({"type": "status", "data": reported})
+
+    def _note_keepalive_state(self, reported: Any) -> None:
+        """Remember the device's last reported value for the keepalive key, so
+        the keepalive can re-assert it rather than forcing a fixed value."""
+        key = self.local_keepalive_key
+        if key is None or not isinstance(reported, dict) or key not in reported:
+            return
+        try:
+            self._last_keepalive_value = int(reported[key])
+        except (TypeError, ValueError):
+            pass
 
     # ------------- sync keepalive -------------
 
@@ -306,6 +351,49 @@ class Daemon:
                     await self._reconnect()
                     sync_failures = 0
 
+    async def local_keepalive_loop(self) -> None:
+        """
+        Local-only keepalive: periodically re-assert a single key to keep the
+        device's local control session warm.
+
+        Background: CX-series units appear to drop their local control session
+        after roughly an hour of pure observe traffic, after which every `set`
+        is silently ignored. Exercising the control channel with a write on a
+        fixed cadence prevents that.
+
+        To avoid clobbering a user-set value, we re-write the *last value the
+        device reported* for this key (tracked via _note_keepalive_state),
+        falling back to the configured value only until the first status frame
+        arrives. Re-asserting the current value is a no-op state change, so the
+        device's observe echo carries no surprise and HomeKit stays consistent
+        (e.g. a user's Beep=on is preserved). We reuse do_set() so the write
+        serializes against sync/observe via _coap_lock, and we never emit a
+        set_result for it (it bypasses _dispatch) to keep HomeKit quiet.
+        """
+        key = self.local_keepalive_key
+        fallback = self.local_keepalive_value
+        if key is None or fallback is None or self.local_keepalive_sec <= 0:
+            return
+        while not self._stop.is_set():
+            try:
+                await asyncio.sleep(self.local_keepalive_sec)
+                if self._stop.is_set():
+                    return
+                if self.client is None:
+                    # Mid-reconnect — skip this tick, try again next cycle.
+                    continue
+                value = self._last_keepalive_value
+                if value is None:
+                    value = fallback
+                await self.do_set({key: value})
+                log("debug", f"local keepalive ok ({key}={value})")
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                # Never let a single failed write kill the keepalive loop.
+                log("warn",
+                    f"local keepalive failed: {exc.__class__.__name__}: {exc}")
+
     async def _reconnect(self) -> None:
         if self.client is not None:
             try:
@@ -317,17 +405,24 @@ class Daemon:
             await self.connect()
             self._last_frame_at = asyncio.get_event_loop().time()
             emit({"type": "ready"})
-            # Re-seed the initial state via a one-shot cloud read — the device
-            # may have gone cold again across the reconnect.
-            self.schedule_cloud_bootstrap()
+            # Re-seed the initial state via a one-shot cloud read — but only if
+            # the cloud source is configured at all. In local-only mode we never
+            # touch the cloud on reconnect (no guest id was passed), so a failing
+            # or absent cloud can't get in the way of local control.
+            if self.guest_id:
+                self.schedule_cloud_bootstrap()
         except Exception as exc:
             log("warn", f"reconnect failed: {exc}")
 
     # ------------- set commands -------------
 
     async def do_set(self, data: dict[str, Any]) -> bool:
-        assert self.client is not None
+        # Re-check the client *inside* the lock: a reconnect can null it out
+        # between a caller's pre-check and here (the keepalive loop and set
+        # dispatch both race against keepalive_loop -> _reconnect).
         async with self._coap_lock:
+            if self.client is None:
+                return False
             return await self.client.set_control_values(data=data)
 
     # ------------- stdin handler -------------
@@ -391,14 +486,25 @@ class Daemon:
         # observe starts immediately). The connection is closed again right
         # after — we never hold the device's control session, otherwise local
         # `set` writes get silently ignored. Local observe is the steady-state
-        # status source from here on.
-        self.schedule_cloud_bootstrap()
+        # status source from here on. Skipped entirely in local-only mode
+        # (no guest id), where the cloud is never contacted.
+        if self.guest_id:
+            self.schedule_cloud_bootstrap()
 
         tasks = [
             asyncio.create_task(self.observe_loop(), name="observe"),
             asyncio.create_task(self.keepalive_loop(), name="keepalive"),
             asyncio.create_task(self.stdin_loop(), name="stdin"),
         ]
+        if (self.local_keepalive_key is not None
+                and self.local_keepalive_value is not None
+                and self.local_keepalive_sec > 0):
+            tasks.append(asyncio.create_task(
+                self.local_keepalive_loop(), name="local-keepalive"))
+            log("info",
+                f"local keepalive active: re-asserting {self.local_keepalive_key} "
+                f"(fallback {self.local_keepalive_value}) every "
+                f"{self.local_keepalive_sec:.0f}s")
         try:
             await self._stop.wait()
         finally:
@@ -427,6 +533,13 @@ def main() -> int:
     ap.add_argument("--device-id",
                     help="Cloud device id (AWS-IoT thing name). Falls back to the local "
                          "/sys/dev/info device_id if omitted.")
+    ap.add_argument("--local-keepalive-key",
+                    help="D-code written periodically in local-only mode to keep the "
+                         "device's local control session warm (e.g. the beep-off key).")
+    ap.add_argument("--local-keepalive-value", type=int,
+                    help="Value written for --local-keepalive-key (e.g. 0 for beep off).")
+    ap.add_argument("--local-keepalive-sec", type=float, default=0.0,
+                    help="Interval between local keepalive writes (default: 0 = disabled).")
     args = ap.parse_args()
 
     daemon = Daemon(
@@ -436,6 +549,9 @@ def main() -> int:
         idle_rebuild_sec=args.idle_rebuild_sec,
         guest_id=args.guest_id,
         device_id=args.device_id,
+        local_keepalive_key=args.local_keepalive_key,
+        local_keepalive_value=args.local_keepalive_value,
+        local_keepalive_sec=args.local_keepalive_sec,
     )
     try:
         return asyncio.run(daemon.run())

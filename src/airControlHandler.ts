@@ -37,6 +37,19 @@ export abstract class AirControlHandler {
   /** Whether the cloud shadow status source is enabled for this device. */
   protected cloudEnabled: boolean = true;
   protected keepaliveSec: number;
+  /**
+   * Local-only mode: cloud is never contacted, and the daemon periodically
+   * writes a silent keepalive (the profile's beep-off pair) to keep the
+   * device's local control session warm. Fixes CX-series units going
+   * unresponsive after ~60 min of pure observe traffic.
+   */
+  protected localOnlyMode: boolean = false;
+  /** Interval for the local keepalive write (seconds); 0 disables it. */
+  protected localKeepaliveSec: number;
+  /** D-code + value the local keepalive writes — set by the subclass from its
+   * profile before calling longPoll() (the base class has no profile). */
+  protected localKeepaliveKey: string | undefined;
+  protected localKeepaliveValue: number | undefined;
 
   private daemonProc: ChildProcess | undefined;
   private shutdownRequested: boolean = false;
@@ -71,11 +84,18 @@ export abstract class AirControlHandler {
     // AWS-IoT thing name; the guest id is a stable per-install anonymous
     // identity shared across all devices. Disabled per-device via `cloudStatus`.
     this.cloudDeviceId = device.deviceId;
-    this.cloudEnabled = device.cloudStatus !== false;
+    // Local-only mode forces the cloud off regardless of cloudStatus — no cloud
+    // bootstrap at startup or on reconnect — and turns on the local keepalive.
+    this.localOnlyMode = device.localOnlyMode === true;
+    this.cloudEnabled = !this.localOnlyMode && device.cloudStatus !== false;
     this.guestId = this.cloudEnabled ? this.platform.getGuestId() : undefined;
     this.keepaliveSec = Number(device.keepaliveSec ?? 5);
     if (!Number.isFinite(this.keepaliveSec) || this.keepaliveSec < 1) {
       this.keepaliveSec = 5;
+    }
+    this.localKeepaliveSec = Number(device.localKeepaliveSec ?? 60);
+    if (!Number.isFinite(this.localKeepaliveSec) || this.localKeepaliveSec < 0) {
+      this.localKeepaliveSec = 60;
     }
 
     const __filename = fileURLToPath(import.meta.url);
@@ -134,6 +154,23 @@ export abstract class AirControlHandler {
       args.push('--guest-id', this.guestId);
       if (this.cloudDeviceId) {
         args.push('--device-id', String(this.cloudDeviceId));
+      }
+    }
+    // Local-only keepalive: ask the daemon to write the profile's silent
+    // beep-off pair on a fixed cadence so the device's local control session
+    // stays alive. Only when the mode is on, a key is known and the interval > 0.
+    if (this.localOnlyMode && this.localKeepaliveSec > 0) {
+      if (this.localKeepaliveKey !== undefined && this.localKeepaliveValue !== undefined) {
+        args.push(
+          '--local-keepalive-key', String(this.localKeepaliveKey),
+          '--local-keepalive-value', String(this.localKeepaliveValue),
+          '--local-keepalive-sec', String(this.localKeepaliveSec),
+        );
+      } else {
+        this.platform.log.warn(
+          'localOnlyMode is on but this device has no beep control — keepalive disabled',
+          this.accessory.displayName,
+        );
       }
     }
     this.platform.log.info('Starting daemon:', this.accessory.displayName);

@@ -151,6 +151,11 @@ export class SmartFanHeaterAccessory extends AirControlHandler {
     this.autoPlusAIService.getCharacteristic(this.platform.Characteristic.On)
       .onSet(this.setAutoPlusAI.bind(this));
 
+    // Local-only keepalive writes beep-off (D03130=0) — silent + idempotent.
+    // The Smart Fan Heater has no profile, so the key/value are fixed here.
+    this.localKeepaliveKey = 'D03130';
+    this.localKeepaliveValue = 0;
+
     this.longPoll();
   
   }  
